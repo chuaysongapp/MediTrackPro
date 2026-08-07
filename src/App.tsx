@@ -94,7 +94,21 @@ export default function App() {
     try {
       await loginWithGoogle();
     } catch (err: any) {
-      alert("ไม่สามารถเข้าสู่ระบบด้วย Google ได้: " + (err.message || "เกิดข้อผิดพลาด"));
+      const errStr = String(err?.code || '') + ' ' + String(err?.message || '') + ' ' + String(err);
+      if (errStr.includes('unauthorized-domain')) {
+        const confirmGuest = window.confirm(
+          "โดเมน 'chuaysongapp.github.io' ยังไม่ถูกเพิ่มใน Authorized Domains ของ Firebase โปรเจกต์ meditrackpro-370f2\n\n" +
+          "💡 วิธีแก้ไข:\n" +
+          "1. เข้าไปที่ Firebase Console (Authentication > Settings > Authorized domains)\n" +
+          "2. กด Add Domain แล้วเพิ่ม 'chuaysongapp.github.io'\n\n" +
+          "ต้องการเข้าสู่ระบบด้วย 'โหมด Guest (Anonymous)' ชั่วคราวก่อนหรือไม่?"
+        );
+        if (confirmGuest) {
+          handleLoginGuest();
+        }
+      } else {
+        alert("ไม่สามารถเข้าสู่ระบบด้วย Google ได้: " + (err?.message || "เกิดข้อผิดพลาด"));
+      }
     }
   };
 
