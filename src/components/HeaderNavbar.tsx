@@ -12,6 +12,7 @@ import {
   Palette,
   Check,
   FileText,
+  Smartphone,
 } from "lucide-react";
 import { UserProfile, Medicine } from "../types";
 
@@ -25,6 +26,7 @@ interface HeaderNavbarProps {
   currentTheme?: UITheme;
   onThemeChange?: (theme: UITheme) => void;
   onOpenDoctorReport?: () => void;
+  onOpenPwaModal?: () => void;
   onSelectProfile: (profile: UserProfile) => void;
   onOpenAddProfile: () => void;
   onNavigateTab: (tab: string) => void;
@@ -38,6 +40,7 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
   currentTheme = "high-density",
   onThemeChange,
   onOpenDoctorReport,
+  onOpenPwaModal,
   onSelectProfile,
   onOpenAddProfile,
   onNavigateTab,
@@ -105,8 +108,21 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
             </div>
           </div>
 
-          {/* Right Controls: Doctor Report, Theme Selector, Low Stock Alert, Offline Indicator, Profile Switcher */}
+          {/* Right Controls: Install App, Doctor Report, Theme Selector, Low Stock Alert, Offline Indicator, Profile Switcher */}
           <div className="flex items-center gap-1 sm:gap-2.5 shrink-0">
+            {/* PWA App Install Button */}
+            {onOpenPwaModal && (
+              <button
+                type="button"
+                onClick={onOpenPwaModal}
+                className="flex items-center gap-1 p-1.5 sm:px-2.5 sm:py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-2xs shrink-0"
+                title="ติดตั้งทางลัดเป็นแอปบนมือถือ/คอมพิวเตอร์"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">ติดตั้งเป็นแอป</span>
+              </button>
+            )}
+
             {/* Doctor Report Modal Trigger Button */}
             {onOpenDoctorReport && (
               <button

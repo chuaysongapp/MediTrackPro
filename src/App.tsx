@@ -26,6 +26,7 @@ import { AddVitalsModal } from "./components/AddVitalsModal";
 import { AddAppointmentModal } from "./components/AddAppointmentModal";
 import { AddProfileModal } from "./components/AddProfileModal";
 import { DoctorReportModal } from "./components/DoctorReportModal";
+import { PwaInstallModal } from "./components/PwaInstallModal";
 
 export default function App() {
   const [data, setData] = useState<SystemData>(() => loadInitialData());
@@ -159,7 +160,9 @@ export default function App() {
   const [showAddVitalsModal, setShowAddVitalsModal] = useState<boolean>(false);
   const [showAddApptModal, setShowAddApptModal] = useState<boolean>(false);
   const [showAddProfileModal, setShowAddProfileModal] = useState<boolean>(false);
+  const [editingProfile, setEditingProfile] = useState<UserProfile | null>(null);
   const [showDoctorReportModal, setShowDoctorReportModal] = useState<boolean>(false);
+  const [showPwaModal, setShowPwaModal] = useState<boolean>(false);
 
   // Sync to local storage on data change
   useEffect(() => {
@@ -383,20 +386,28 @@ export default function App() {
     }));
   };
 
-  // Add Family Profile
-  const handleSaveProfile = (profData: Omit<UserProfile, "id">) => {
-    const newProf: UserProfile = {
-      ...profData,
-      id: `prof_${Date.now()}`,
-    };
+  // Add or Edit Family Profile
+  const handleSaveProfile = (profData: Omit<UserProfile, "id">, editId?: string) => {
+    if (editId) {
+      setData((prev) => ({
+        ...prev,
+        profiles: prev.profiles.map((p) => (p.id === editId ? { ...profData, id: editId } : p)),
+      }));
+      setEditingProfile(null);
+    } else {
+      const newProf: UserProfile = {
+        ...profData,
+        id: `prof_${Date.now()}`,
+      };
 
-    setData((prev) => ({
-      ...prev,
-      profiles: [...prev.profiles, newProf],
-      activeProfileId: newProf.id,
-    }));
+      setData((prev) => ({
+        ...prev,
+        profiles: [...prev.profiles, newProf],
+        activeProfileId: newProf.id,
+      }));
 
-    setShowAddProfileModal(false);
+      setShowAddProfileModal(false);
+    }
   };
 
   // Save LINE Config
@@ -511,6 +522,7 @@ export default function App() {
         currentTheme={theme}
         onThemeChange={handleThemeChange}
         onOpenDoctorReport={() => setShowDoctorReportModal(true)}
+        onOpenPwaModal={() => setShowPwaModal(true)}
         onSelectProfile={handleSelectProfile}
         onOpenAddProfile={() => setShowAddProfileModal(true)}
         onNavigateTab={(tab) => setActiveTab(tab)}
@@ -540,6 +552,7 @@ export default function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onSendLineNotify={handleSendTestLineMessage}
             onOpenDoctorReport={() => setShowDoctorReportModal(true)}
+            onOpenEditProfile={(prof) => setEditingProfile(prof)}
           />
         )}
 
@@ -603,6 +616,8 @@ export default function App() {
             onExportJson={handleExportJson}
             onImportJson={handleImportJson}
             onOpenAddProfile={() => setShowAddProfileModal(true)}
+            onOpenEditProfile={(prof) => setEditingProfile(prof)}
+            onOpenPwaModal={() => setShowPwaModal(true)}
           />
         )}
       </main>
@@ -664,6 +679,15 @@ export default function App() {
         />
       )}
 
+      {/* Edit Profile Modal */}
+      {editingProfile && (
+        <AddProfileModal
+          initialProfile={editingProfile}
+          onClose={() => setEditingProfile(null)}
+          onSave={handleSaveProfile}
+        />
+      )}
+
       {/* Doctor Report Modal */}
       {showDoctorReportModal && (
         <DoctorReportModal
@@ -673,6 +697,11 @@ export default function App() {
           intakeLogs={data.intakeLogs}
           onClose={() => setShowDoctorReportModal(false)}
         />
+      )}
+
+      {/* PWA App Install Modal */}
+      {showPwaModal && (
+        <PwaInstallModal onClose={() => setShowPwaModal(false)} />
       )}
 
       {/* High Density Footer */}

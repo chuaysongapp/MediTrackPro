@@ -18,6 +18,8 @@ import {
   KeyRound,
   Palette,
   Sparkles,
+  Edit,
+  Smartphone,
 } from "lucide-react";
 import { LineConfig, UserProfile, SystemData } from "../types";
 import { UITheme } from "./HeaderNavbar";
@@ -35,6 +37,8 @@ interface LineAndSettingsViewProps {
   onExportJson: () => void;
   onImportJson: (jsonData: string) => void;
   onOpenAddProfile: () => void;
+  onOpenEditProfile?: (profile: UserProfile) => void;
+  onOpenPwaModal?: () => void;
 }
 
 export const LineAndSettingsView: React.FC<LineAndSettingsViewProps> = ({
@@ -50,6 +54,8 @@ export const LineAndSettingsView: React.FC<LineAndSettingsViewProps> = ({
   onExportJson,
   onImportJson,
   onOpenAddProfile,
+  onOpenEditProfile,
+  onOpenPwaModal,
 }) => {
   const [notifyToken, setNotifyToken] = useState(lineConfig.notifyToken || "");
   const [messagingUserId, setMessagingUserId] = useState(lineConfig.messagingUserId || "");
@@ -562,6 +568,31 @@ export const LineAndSettingsView: React.FC<LineAndSettingsViewProps> = ({
 
         {/* Cloud Backup, Google Drive & Multi-Account Card */}
         <div className="space-y-6">
+          {/* PWA Mobile App Installation Card */}
+          {onOpenPwaModal && (
+            <div className="bg-gradient-to-br from-emerald-900 to-slate-900 text-white rounded-3xl p-6 border border-emerald-700/50 shadow-lg space-y-3 relative overflow-hidden">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-md">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-sm">ติดตั้งเป็นแอปมือถือ (PWA Shortcut)</h3>
+                  <p className="text-[10px] text-emerald-200">ใช้งานเหมือนแอปจริง เปิดผ่านไอคอนหน้าจอหลัก มือถือเปิดเร็ว</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                คุณสามารถเพิ่ม MediTrack Pro ลงบนหน้าจอมือถือ (iPhone / Android) เพื่อเปิดใช้งานได้เต็มจอทันทีโดยไม่ติดแถบ URL ของเบราว์เซอร์
+              </p>
+              <button
+                onClick={onOpenPwaModal}
+                className="w-full py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-2xl text-xs transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>ดูวิธีติดตั้งลงหน้าจอมือถือ (Install App)</span>
+              </button>
+            </div>
+          )}
+
           {/* Cloud Sync & Backup Box */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
@@ -667,13 +698,24 @@ export const LineAndSettingsView: React.FC<LineAndSettingsViewProps> = ({
                       <p className="text-slate-400 text-[10px]">{p.relationship} • อายุ {p.age} ปี</p>
                     </div>
                   </div>
-                  {p.pinCode ? (
-                    <span className="text-[10px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-                      <Lock className="w-3 h-3" /> ล็อก PIN
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 font-medium">ไม่มี PIN</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {p.pinCode ? (
+                      <span className="text-[10px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> ล็อก PIN
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-medium">ไม่มี PIN</span>
+                    )}
+                    {onOpenEditProfile && (
+                      <button
+                        onClick={() => onOpenEditProfile(p)}
+                        className="p-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-slate-700 hover:text-emerald-700 transition-all cursor-pointer"
+                        title="แก้ไขข้อมูลและรูปโปรไฟล์"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

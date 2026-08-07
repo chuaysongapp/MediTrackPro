@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   ChevronRight,
   FileText,
+  Edit,
 } from "lucide-react";
 import {
   UserProfile,
@@ -49,6 +50,7 @@ interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
   onSendLineNotify: (msg: string) => void;
   onOpenDoctorReport?: () => void;
+  onOpenEditProfile?: (profile: UserProfile) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -64,6 +66,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateTab,
   onSendLineNotify,
   onOpenDoctorReport,
+  onOpenEditProfile,
 }) => {
   const [showQuickMenu, setShowQuickMenu] = useState<boolean>(false);
   const todayStr = new Date().toISOString().split("T")[0];
@@ -151,6 +154,16 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
                   <span className="text-[10px] bg-rose-950/80 text-rose-300 border border-rose-800/60 px-2 py-0.5 rounded font-bold">
                     กรุ๊ปเลือด {activeProfile.bloodType}
                   </span>
+                )}
+                {onOpenEditProfile && (
+                  <button
+                    onClick={() => onOpenEditProfile(activeProfile)}
+                    className="inline-flex items-center gap-1 text-[11px] bg-blue-600/30 hover:bg-blue-600 text-blue-200 hover:text-white border border-blue-500/40 px-2 py-0.5 rounded-md transition-all cursor-pointer font-medium"
+                    title="แก้ไขข้อมูลและรูปโปรไฟล์"
+                  >
+                    <Edit className="w-3 h-3" />
+                    <span>แก้ไขโปรไฟล์</span>
+                  </button>
                 )}
               </div>
 
