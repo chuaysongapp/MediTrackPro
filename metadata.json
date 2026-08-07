@@ -1,0 +1,6 @@
+{
+  "name": "ระบบคลังยาและติดตามสุขภาพ (Med & Health Tracker)",
+  "description": "ระบบบริหารคลังยา แจ้งเตือนทานยาแต่ละมื้อ บันทึกประวัติสุขภาพ น้ำหนัก ความดัน ค่าน้ำตาล กราฟสรุปรายเดือน แจ้งเตือนผ่าน LINE และวิเคราะห์ด้วย AI",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

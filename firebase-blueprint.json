@@ -1,0 +1,24 @@
+{
+  "entities": {
+    "userData": {
+      "title": "User Data",
+      "description": "Per-user private health, medicine, and vitals data for MediTrack Pro",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "systemData": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "securityRules": [
+    {
+      "collection": "users/{userId}",
+      "read": "request.auth != null && request.auth.uid == userId",
+      "write": "request.auth != null && request.auth.uid == userId"
+    }
+  ]
+}
