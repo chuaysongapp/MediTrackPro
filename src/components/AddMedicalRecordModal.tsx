@@ -87,6 +87,36 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     });
   };
 
+  // Demo RAMA Report Loader
+  const handleLoadRamaDemo = () => {
+    setPdfFileName("RAMA_Lab_Report_5736888.pdf");
+    setTitle("รายงานผลตรวจเลือดและเคมีคลินิก - คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี");
+    setHospital("คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี");
+    setPatientName("นาย ณรงค์ ช่วยสงค์");
+    setDate("2025-10-29");
+    setFbs("126");
+    setHba1c("8.27");
+    setCholesterol("128");
+    setTriglyceride("91");
+    setHdl("36");
+    setLdl("81");
+    setCreatinine("0.71");
+    setEgfr("119");
+    setDiagnosis("ระดับ HbA1c 8.27% และ Glucose 126 mg/dL (สูงกว่าเกณฑ์) / ไขมัน HDL 36 mg/dL (ต่ำกว่าเกณฑ์) / การทำงานของไต eGFR 119 อยู่ในเกณฑ์ดีมาก");
+    setDoctorNotes("แนะนำให้ควบคุมปริมาณคาร์โบไฮเดรตและน้ำตาล เพิ่มการออกกำลังกาย และติดตามระดับน้ำตาลสะสมกับแพทย์");
+    setCustomItems([
+      { testName: "Estimated Average Glucose", resultValue: "191", unit: "mg/dL", refRange: "", flag: "high" },
+      { testName: "Sodium (โซเดียม)", resultValue: "141", unit: "mmol/L", refRange: "136 - 145", flag: "normal" },
+      { testName: "Potassium (โพแทสเซียม)", resultValue: "4.34", unit: "mmol/L", refRange: "3.50 - 5.10", flag: "normal" },
+      { testName: "Chloride (คลอไรด์)", resultValue: "106", unit: "mmol/L", refRange: "98 - 107", flag: "normal" },
+      { testName: "Carbondioxide (คาร์บอนไดออกไซด์)", resultValue: "23.1", unit: "mmol/L", refRange: "22.0 - 29.0", flag: "normal" },
+      { testName: "Albumin/Creatinine Ratio (Urine)", resultValue: "12.367", unit: "mg/g", refRange: "< 30", flag: "normal" },
+      { testName: "Albumin Urine", resultValue: "2.040", unit: "mg/dL", refRange: "< 2.90", flag: "normal" },
+    ]);
+    setIsAiParsed(true);
+    setUploadSuccess("โหลดข้อมูลตัวอย่างจากไฟล์แล็บโรงพยาบาลรามาธิบดี (นาย ณรงค์ ช่วยสงค์) เรียบร้อยแล้ว! สามารถตรวจสอบและกดบันทึกได้ทันที");
+  };
+
   // Handle PDF / File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -98,63 +128,63 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     setUploadSuccess("");
 
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64Data = reader.result as string;
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("ไม่สามารถอ่านไฟล์ได้"));
+        reader.readAsDataURL(file);
+      });
 
-        // Call backend API /api/ai/parse-lab-report
-        const res = await fetch("/api/ai/parse-lab-report", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileData: base64Data,
-            fileType: file.type || "application/pdf",
-            fileName: file.name,
-          }),
-        });
+      // Call backend API /api/ai/parse-lab-report
+      const res = await fetch("/api/ai/parse-lab-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileData: base64Data,
+          fileType: file.type || "application/pdf",
+          fileName: file.name,
+        }),
+      });
 
-        const data = await res.json();
-        if (data.success && data.data) {
-          const parsed = data.data;
+      const data = await res.json();
+      if (data.success && data.data) {
+        const parsed = data.data;
 
-          if (parsed.title) setTitle(parsed.title);
-          if (parsed.hospital) setHospital(parsed.hospital);
-          if (parsed.patientName) setPatientName(parsed.patientName);
-          if (parsed.date) setDate(parsed.date);
-          if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
-          if (parsed.doctorNotes) setDoctorNotes(parsed.doctorNotes);
+        if (parsed.title) setTitle(parsed.title);
+        if (parsed.hospital) setHospital(parsed.hospital);
+        if (parsed.patientName) setPatientName(parsed.patientName);
+        if (parsed.date) setDate(parsed.date);
+        if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
+        if (parsed.doctorNotes) setDoctorNotes(parsed.doctorNotes);
 
-          if (parsed.labResults) {
-            const lr = parsed.labResults;
-            if (lr.fbs !== undefined) setFbs(String(lr.fbs));
-            if (lr.hba1c !== undefined) setHba1c(String(lr.hba1c));
-            if (lr.cholesterol !== undefined) setCholesterol(String(lr.cholesterol));
-            if (lr.triglyceride !== undefined) setTriglyceride(String(lr.triglyceride));
-            if (lr.hdl !== undefined) setHdl(String(lr.hdl));
-            if (lr.ldl !== undefined) setLdl(String(lr.ldl));
-            if (lr.creatinine !== undefined) setCreatinine(String(lr.creatinine));
-            if (lr.bun !== undefined) setBun(String(lr.bun));
-            if (lr.egfr !== undefined) setEgfr(String(lr.egfr));
-            if (lr.sgot !== undefined) setSgot(String(lr.sgot));
-            if (lr.sgpt !== undefined) setSgpt(String(lr.sgpt));
-            if (lr.uricAcid !== undefined) setUricAcid(String(lr.uricAcid));
-            if (lr.hemoglobin !== undefined) setHemoglobin(String(lr.hemoglobin));
-            if (lr.wbc !== undefined) setWbc(String(lr.wbc));
-            if (lr.platelet !== undefined) setPlatelet(String(lr.platelet));
+        if (parsed.labResults) {
+          const lr = parsed.labResults;
+          if (lr.fbs !== undefined && lr.fbs !== null) setFbs(String(lr.fbs));
+          if (lr.hba1c !== undefined && lr.hba1c !== null) setHba1c(String(lr.hba1c));
+          if (lr.cholesterol !== undefined && lr.cholesterol !== null) setCholesterol(String(lr.cholesterol));
+          if (lr.triglyceride !== undefined && lr.triglyceride !== null) setTriglyceride(String(lr.triglyceride));
+          if (lr.hdl !== undefined && lr.hdl !== null) setHdl(String(lr.hdl));
+          if (lr.ldl !== undefined && lr.ldl !== null) setLdl(String(lr.ldl));
+          if (lr.creatinine !== undefined && lr.creatinine !== null) setCreatinine(String(lr.creatinine));
+          if (lr.bun !== undefined && lr.bun !== null) setBun(String(lr.bun));
+          if (lr.egfr !== undefined && lr.egfr !== null) setEgfr(String(lr.egfr));
+          if (lr.sgot !== undefined && lr.sgot !== null) setSgot(String(lr.sgot));
+          if (lr.sgpt !== undefined && lr.sgpt !== null) setSgpt(String(lr.sgpt));
+          if (lr.uricAcid !== undefined && lr.uricAcid !== null) setUricAcid(String(lr.uricAcid));
+          if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) setHemoglobin(String(lr.hemoglobin));
+          if (lr.wbc !== undefined && lr.wbc !== null) setWbc(String(lr.wbc));
+          if (lr.platelet !== undefined && lr.platelet !== null) setPlatelet(String(lr.platelet));
 
-            if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
-              setCustomItems(lr.customItems);
-            }
+          if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
+            setCustomItems(lr.customItems);
           }
-
-          setIsAiParsed(true);
-          setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! กรุณาตรวจสอบความถูกต้อง 100% ด้านล่างก่อนบันทึก`);
-        } else {
-          setUploadError(data.error || "ไม่สามารถถอดข้อมูลจากไฟล์ PDF ได้");
         }
-      };
 
-      reader.readAsDataURL(file);
+        setIsAiParsed(true);
+        setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! กรุณาตรวจสอบความถูกต้อง 100% ด้านล่างก่อนบันทึก`);
+      } else {
+        setUploadError(data.error || "ไม่สามารถถอดข้อมูลจากไฟล์ PDF ได้");
+      }
     } catch (err: any) {
       setUploadError("เกิดข้อผิดพลาดในการโหลดไฟล์ PDF: " + err.message);
     } finally {
@@ -269,26 +299,38 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
               </p>
             </div>
 
-            <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer">
-              {isUploading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>กำลังอ่านไฟล์ PDF และดึงค่าผลตรวจเลือด...</span>
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4" />
-                  <span>เลือกไฟล์ PDF ผลตรวจเลือด</span>
-                </>
-              )}
-              <input
-                type="file"
-                accept=".pdf,image/*"
-                onChange={handleFileUpload}
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer">
+                {isUploading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>กำลังอ่านไฟล์ PDF และดึงค่าผลตรวจเลือด...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>เลือกไฟล์ PDF ผลตรวจเลือด</span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept=".pdf,image/*"
+                  onChange={handleFileUpload}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={handleLoadRamaDemo}
                 disabled={isUploading}
-                className="hidden"
-              />
-            </label>
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white hover:bg-emerald-100 text-emerald-800 font-extrabold text-xs rounded-xl border border-emerald-300 shadow-2xs transition-all cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-600" />
+                <span>⚡ โหลดผลตรวจเลือดตัวอย่างโรงพยาบาลรามาธิบดี (HN: 5736888)</span>
+              </button>
+            </div>
 
             {uploadSuccess && (
               <div className="bg-emerald-100 border border-emerald-300 text-emerald-900 p-3 rounded-xl text-xs font-bold flex items-center gap-2 text-left">

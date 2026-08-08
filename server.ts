@@ -7,7 +7,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // In-memory cloud backup store for multi-profile sync
   const cloudStorageMemory: Record<string, any> = {};
@@ -121,18 +122,29 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
 
 โปรดสรุปผลสุขภาพรายเดือน วิเคราะห์สถานะคลังยาและสัญญาณชีพ พร้อมให้คำแนะนำและข้อควรระวังครับ`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-        },
-      });
+      let responseText = "";
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      
+      for (const modelName of modelsToTry) {
+        try {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+              systemInstruction,
+              temperature: 0.7,
+            },
+          });
+          responseText = res.text || "";
+          if (responseText) break;
+        } catch (mErr) {
+          console.warn(`Model ${modelName} failed for advice, trying next...`, mErr);
+        }
+      }
 
       return res.json({
         success: true,
-        advice: response.text || "ไม่สามารถสร้างคำแนะนำได้ในขณะนี้",
+        advice: responseText || "ไม่สามารถสร้างคำแนะนำได้ในขณะนี้",
         generatedAt: new Date().toISOString(),
       });
     } catch (err: any) {
@@ -223,17 +235,48 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
         return res.status(400).json({ success: false, error: "กรุณาส่งไฟล์ PDF หรือข้อความในเอกสาร" });
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.1,
-        },
-      });
+      let rawText = "";
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
 
-      const rawText = response.text || "";
-      const cleanJson = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+      for (const modelName of modelsToTry) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+              responseMimeType: "application/json",
+            },
+          });
+          rawText = response.text || "";
+          if (rawText) break;
+        } catch (mErr) {
+          console.warn(`Model ${modelName} failed for lab report parsing, trying next...`, mErr);
+        }
+      }
+
+      if (!rawText) {
+        // Fallback without responseMimeType if json mode failed on older model
+        for (const modelName of modelsToTry) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents,
+              config: {
+                systemInstruction,
+                temperature: 0.1,
+              },
+            });
+            rawText = response.text || "";
+            if (rawText) break;
+          } catch (mErr) {
+            console.warn(`Model ${modelName} standard mode failed...`, mErr);
+          }
+        }
+      }
+
+      const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
       let parsedData: any = {};
       try {
         parsedData = JSON.parse(cleanJson);
