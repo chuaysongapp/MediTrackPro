@@ -36,7 +36,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
 
   // Form State
   const [title, setTitle] = useState<string>("ผลตรวจเลือดและเคมีคลินิก");
-  const [hospital, setHospital] = useState<string>("โรงพยาบาลกรุงเทพ / คลินิกแล็บ");
+  const [hospital, setHospital] = useState<string>("");
   const [patientName, setPatientName] = useState<string>(profileName);
   const [date, setDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [diagnosis, setDiagnosis] = useState<string>("");
@@ -98,6 +98,27 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     setUploadError("");
     setUploadSuccess("");
 
+    // Reset all numeric lab fields to empty before parsing new document
+    setFbs("");
+    setHba1c("");
+    setCholesterol("");
+    setTriglyceride("");
+    setHdl("");
+    setLdl("");
+    setCreatinine("");
+    setBun("");
+    setEgfr("");
+    setSgot("");
+    setSgpt("");
+    setUricAcid("");
+    setHemoglobin("");
+    setWbc("");
+    setPlatelet("");
+    setCustomItems([]);
+    setHospital("");
+    setDiagnosis("");
+    setDoctorNotes("");
+
     try {
       // 1. Client-side PDF text extraction
       let extractedText = "";
@@ -107,7 +128,6 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
 
       // 2. Immediate Local RegEx parsing as instant fallback
       let localParsed = parseLabTextWithRegex(extractedText, file.name);
-      let hasLocalData = false;
 
       if (localParsed) {
         if (localParsed.hospital) setHospital(localParsed.hospital);
@@ -136,15 +156,6 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
             setCustomItems(lr.customItems);
           }
         }
-
-        hasLocalData = Boolean(
-          localParsed.hospital ||
-          localParsed.patientName ||
-          localParsed.date ||
-          localParsed.title ||
-          (localParsed.labResults && Object.keys(localParsed.labResults).some(k => k !== 'customItems' && (localParsed.labResults as any)[k] !== undefined)) ||
-          (localParsed.labResults?.customItems && localParsed.labResults.customItems.length > 0)
-        );
       }
 
       // 3. Convert to base64 if small enough (< 8MB)
@@ -216,20 +227,28 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
           }
         }
       } catch (apiErr) {
-        console.warn("Server AI Lab parse request error, using client extraction fallback:", apiErr);
+        console.warn("Server AI Lab parse request notice:", apiErr);
       }
 
       setIsAiParsed(true);
       setUploadError("");
-      if (serverParsedSuccess || hasLocalData) {
-        setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! กรุณาตรวจสอบข้อมูลในแบบฟอร์มด้านล่างแล้วกดบันทึกได้ทันที`);
+
+      // Calculate total extracted numeric lab items
+      const hasAnyExtractedValues = Boolean(
+        fbs || hba1c || cholesterol || triglyceride || hdl || ldl ||
+        creatinine || bun || egfr || sgot || sgpt || uricAcid ||
+        hemoglobin || wbc || platelet || customItems.length > 0
+      );
+
+      if (serverParsedSuccess || hasAnyExtractedValues) {
+        setUploadSuccess(`วิเคราะห์ไฟล์ "${file.name}" เรียบร้อยแล้ว! กรุณาตรวจสอบข้อมูลที่สกัดได้ในแบบฟอร์มด้านล่าง`);
       } else {
-        setUploadSuccess(`นำเข้าไฟล์ "${file.name}" เรียบร้อยแล้ว! กรุณาตรวจสอบและกรอกค่าผลแล็บในแบบฟอร์มด้านล่างแล้วกดบันทึกได้ทันที`);
+        setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
       }
     } catch (err: any) {
       setIsAiParsed(true);
       setUploadError("");
-      setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! สามารถพิมพ์กรอกข้อมูลผลตรวจแล็บในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
+      setUploadSuccess(`นำเข้าไฟล์ "${file.name}" เรียบร้อย! คุณสามารถพิมพ์กรอกค่าผลแล็บในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
     } finally {
       setIsUploading(false);
     }
@@ -464,7 +483,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="100"
+                    placeholder="-"
                     value={fbs}
                     onChange={(e) => setFbs(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -481,7 +500,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="6.0"
+                    placeholder="-"
                     value={hba1c}
                     onChange={(e) => setHba1c(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-purple-900 text-xs"
@@ -497,7 +516,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 <div className="relative">
                   <input
                     type="number"
-                    placeholder="180"
+                    placeholder="-"
                     value={cholesterol}
                     onChange={(e) => setCholesterol(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -513,7 +532,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 <div className="relative">
                   <input
                     type="number"
-                    placeholder="130"
+                    placeholder="-"
                     value={triglyceride}
                     onChange={(e) => setTriglyceride(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -529,7 +548,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 <div className="relative">
                   <input
                     type="number"
-                    placeholder="55"
+                    placeholder="-"
                     value={hdl}
                     onChange={(e) => setHdl(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-emerald-800 text-xs"
@@ -545,7 +564,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 <div className="relative">
                   <input
                     type="number"
-                    placeholder="110"
+                    placeholder="-"
                     value={ldl}
                     onChange={(e) => setLdl(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-rose-800 text-xs"
@@ -562,7 +581,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="0.9"
+                    placeholder="-"
                     value={creatinine}
                     onChange={(e) => setCreatinine(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -579,7 +598,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="90"
+                    placeholder="-"
                     value={egfr}
                     onChange={(e) => setEgfr(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -596,7 +615,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="14"
+                    placeholder="-"
                     value={bun}
                     onChange={(e) => setBun(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -612,7 +631,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 <div className="relative">
                   <input
                     type="number"
-                    placeholder="25"
+                    placeholder="-"
                     value={sgot}
                     onChange={(e) => setSgot(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -628,7 +647,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 <div className="relative">
                   <input
                     type="number"
-                    placeholder="30"
+                    placeholder="-"
                     value={sgpt}
                     onChange={(e) => setSgpt(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
@@ -645,7 +664,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="5.5"
+                    placeholder="-"
                     value={uricAcid}
                     onChange={(e) => setUricAcid(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"

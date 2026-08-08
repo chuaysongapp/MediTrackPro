@@ -176,11 +176,13 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       const systemInstruction = `คุณคือระบบปัญญาประดิษฐ์ทางการแพทย์ที่ชำนาญการอ่านเอกสารผลตรวจเลือด (Lab Report), ผลตรวจสุขภาพประจำปี และใบบันทึกการรักษา
 หน้าที่ของคุณคืออ่านข้อมูลจากเอกสาร PDF หรือรูปถ่ายผลแล็บ และสกัดค่าทางการแพทย์ออกมาให้ถูกต้องตรงตามเอกสาร 100%
 
-กฎการสกัดข้อมูล:
-1. ดึงชื่อโรงพยาบาล/คลินิก, วันที่ตรวจ (รูปแบบ YYYY-MM-DD), ชื่อคนไข้, คำวินิจฉัยแพทย์, คำแนะนำแพทย์
-2. ดึงค่าตัวเลขทางการแพทย์อย่างแม่นยำ:
-   - fbs: Fasting Blood Sugar (mg/dL)
-   - hba1c: Glycated Hemoglobin (%)
+กฎการสกัดข้อมูลอย่างเคร่งครัด:
+1. ห้ามสร้างข้อมูลเท็จหรือสุ่มตัวเลขเด็ดขาด! หากในเอกสารไม่มีค่าใด ให้ปล่อยค่าเป็น null หรือละเว้น
+2. ดึงชื่อโรงพยาบาล/คลินิกที่ระบุในเอกสารจริง (ถ้าไม่ระบุให้คืนค่าเป็น "")
+3. ดึงวันที่ตรวจ (รูปแบบ YYYY-MM-DD) และชื่อคนไข้จริงจากเอกสาร (ถ้ามี)
+4. ดึงค่าตัวเลขผลแล็บทางการแพทย์ออกมาตรงตามตัวเลขในเอกสาร:
+   - fbs: Fasting Blood Sugar / Fasting Glucose (mg/dL)
+   - hba1c: Glycated Hemoglobin / HbA1c (%)
    - cholesterol: Total Cholesterol (mg/dL)
    - triglyceride: Triglycerides (mg/dL)
    - hdl: High Density Lipoprotein (mg/dL)
@@ -188,49 +190,47 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
    - creatinine: Blood Creatinine (mg/dL)
    - bun: Blood Urea Nitrogen (mg/dL)
    - egfr: estimated GFR (mL/min/1.73m2)
-   - sgot: AST (U/L)
-   - sgpt: ALT (U/L)
+   - sgot: AST / SGOT (U/L)
+   - sgpt: ALT / SGPT (U/L)
    - uricAcid: Uric Acid (mg/dL)
    - hemoglobin: Hb (g/dL)
    - wbc: White Blood Cells (x10^3/uL)
    - platelet: Platelet Count (x10^3/uL)
-3. สำหรับรายการตรวจวัดอื่นๆ ที่มีในเอกสาร ให้ใส่ในอาร์เรย์ customItems โดยระบุ testName, resultValue, unit, refRange, flag ("normal"|"high"|"low"|"abnormal")
-4. ตอบกลับเฉพาะโครงสร้าง JSON ที่ถูกต้องสมบูรณ์ ห้ามมีข้อความอื่นนอกเหนือจาก JSON`;
+5. สำหรับรายการตรวจวัดอื่นๆ ที่มีในเอกสาร ให้ใส่ในอาร์เรย์ customItems โดยระบุ testName, resultValue, unit, refRange, flag ("normal"|"high"|"low"|"abnormal")
+6. ตอบกลับเป็น JSON Object เท่านั้น ห้ามใส่ข้อความอธิบายอื่น`;
 
-      const promptText = `กรุณาอ่านเอกสารผลตรวจแล็บ/ผลตรวจเลือดนี้ และสกัดข้อมูลออกมาเป็น JSON ในรูปแบบนี้:
+      const promptText = `กรุณาอ่านเอกสารผลตรวจแล็บนี้อย่างละเอียด สกัดข้อมูลตัวเลข ชื่อ รพ. และวันที่ตามเอกสารจริง ออกมาเป็น JSON โครงสร้างนี้:
 {
-  "hospital": "ชื่อโรงพยาบาลหรือคลินิก",
+  "hospital": "",
   "date": "YYYY-MM-DD",
-  "patientName": "ชื่อผู้ป่วย",
-  "title": "หัวข้อเอกสาร เช่น ผลตรวจเลือดประจำปี 2026",
-  "diagnosis": "คำวินิจฉัยสรุป",
-  "doctorNotes": "คำแนะนำแพทย์",
+  "patientName": "",
+  "title": "ผลตรวจเลือดและเคมีคลินิก",
+  "diagnosis": "",
+  "doctorNotes": "",
   "labResults": {
-    "fbs": 105,
-    "hba1c": 6.2,
-    "cholesterol": 198,
-    "triglyceride": 140,
-    "hdl": 52,
-    "ldl": 118,
-    "creatinine": 0.9,
-    "bun": 12,
-    "egfr": 95,
-    "sgot": 24,
-    "sgpt": 28,
-    "uricAcid": 5.4,
-    "hemoglobin": 14.2,
-    "wbc": 6.5,
-    "platelet": 250,
-    "customItems": [
-      { "testName": "Microalbumin/Cr Ratio", "resultValue": "15.2", "unit": "mg/g", "refRange": "<30", "flag": "normal" }
-    ]
+    "fbs": null,
+    "hba1c": null,
+    "cholesterol": null,
+    "triglyceride": null,
+    "hdl": null,
+    "ldl": null,
+    "creatinine": null,
+    "bun": null,
+    "egfr": null,
+    "sgot": null,
+    "sgpt": null,
+    "uricAcid": null,
+    "hemoglobin": null,
+    "wbc": null,
+    "platelet": null,
+    "customItems": []
   }
 }
 ชื่อไฟล์: ${fileName || "document.pdf"}`;
 
       let finalPrompt = promptText;
-      if (textContent) {
-        finalPrompt += `\n\nข้อความสกัดจากเอกสาร:\n${textContent}`;
+      if (textContent && textContent.trim().length > 0) {
+        finalPrompt += `\n\nข้อความที่สกัดได้จากเอกสาร PDF:\n${textContent}`;
       }
 
       const parts: any[] = [];
@@ -253,46 +253,57 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
 
       parts.push({ text: finalPrompt });
 
-      const contents = [{ role: "user", parts }];
+      // Try different contents payload formats supported by @google/genai SDK
+      const contentsPayloads = [
+        { parts },
+        parts,
+        [{ role: "user", parts }],
+      ];
 
       let rawText = "";
-      const modelsToTry = ["gemini-3.6-flash", "gemini-flash-latest"];
+      const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
 
       for (const modelName of modelsToTry) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents,
-            config: {
-              systemInstruction,
-              temperature: 0.1,
-              responseMimeType: "application/json",
-            },
-          });
-          rawText = response.text || "";
-          if (rawText) break;
-        } catch (mErr) {
-          console.warn(`Model ${modelName} JSON mode failed, trying next model or mode...`, mErr);
-        }
-      }
-
-      if (!rawText) {
-        // Fallback without responseMimeType
-        for (const modelName of modelsToTry) {
+        for (const contentsObj of contentsPayloads) {
           try {
             const response = await ai.models.generateContent({
               model: modelName,
-              contents,
+              contents: contentsObj as any,
               config: {
                 systemInstruction,
                 temperature: 0.1,
+                responseMimeType: "application/json",
               },
             });
             rawText = response.text || "";
             if (rawText) break;
           } catch (mErr) {
-            console.warn(`Model ${modelName} standard mode failed...`, mErr);
+            // continue fallback
           }
+        }
+        if (rawText) break;
+      }
+
+      if (!rawText) {
+        // Fallback without responseMimeType
+        for (const modelName of modelsToTry) {
+          for (const contentsObj of contentsPayloads) {
+            try {
+              const response = await ai.models.generateContent({
+                model: modelName,
+                contents: contentsObj as any,
+                config: {
+                  systemInstruction,
+                  temperature: 0.1,
+                },
+              });
+              rawText = response.text || "";
+              if (rawText) break;
+            } catch (mErr) {
+              // continue fallback
+            }
+          }
+          if (rawText) break;
         }
       }
 
@@ -308,9 +319,9 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       } catch (e) {
         parsedData = {
           title: `ผลตรวจจากไฟล์ ${fileName || "PDF"}`,
-          hospital: "โรงพยาบาล/คลินิกในเอกสาร",
+          hospital: "",
           date: new Date().toISOString().split("T")[0],
-          doctorNotes: rawText,
+          doctorNotes: rawText ? `ข้อความจาก AI:\n${rawText}` : "",
         };
       }
 
