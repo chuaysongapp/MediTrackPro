@@ -17,6 +17,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { MedicalRecord, CustomLabItem } from "../types";
+import { extractTextFromPdfFile, parseLabTextWithRegex } from "../utils/labParser";
 
 interface AddMedicalRecordModalProps {
   profileId: string;
@@ -128,65 +129,118 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     setUploadSuccess("");
 
     try {
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("ไม่สามารถอ่านไฟล์ได้"));
-        reader.readAsDataURL(file);
-      });
+      // 1. Client-side PDF text extraction
+      let extractedText = "";
+      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+        extractedText = await extractTextFromPdfFile(file);
+      }
 
-      // Call backend API /api/ai/parse-lab-report
-      const res = await fetch("/api/ai/parse-lab-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileData: base64Data,
-          fileType: file.type || "application/pdf",
-          fileName: file.name,
-        }),
-      });
+      // 2. Immediate Local RegEx parsing as instant fallback
+      let localParsed = parseLabTextWithRegex(extractedText, file.name);
+      let hasLocalData = false;
 
-      const data = await res.json();
-      if (data.success && data.data) {
-        const parsed = data.data;
+      if (extractedText && extractedText.length > 20) {
+        if (localParsed.hospital) setHospital(localParsed.hospital);
+        if (localParsed.patientName) setPatientName(localParsed.patientName);
+        if (localParsed.date) setDate(localParsed.date);
+        if (localParsed.title) setTitle(localParsed.title);
 
-        if (parsed.title) setTitle(parsed.title);
-        if (parsed.hospital) setHospital(parsed.hospital);
-        if (parsed.patientName) setPatientName(parsed.patientName);
-        if (parsed.date) setDate(parsed.date);
-        if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
-        if (parsed.doctorNotes) setDoctorNotes(parsed.doctorNotes);
-
-        if (parsed.labResults) {
-          const lr = parsed.labResults;
-          if (lr.fbs !== undefined && lr.fbs !== null) setFbs(String(lr.fbs));
-          if (lr.hba1c !== undefined && lr.hba1c !== null) setHba1c(String(lr.hba1c));
-          if (lr.cholesterol !== undefined && lr.cholesterol !== null) setCholesterol(String(lr.cholesterol));
-          if (lr.triglyceride !== undefined && lr.triglyceride !== null) setTriglyceride(String(lr.triglyceride));
-          if (lr.hdl !== undefined && lr.hdl !== null) setHdl(String(lr.hdl));
-          if (lr.ldl !== undefined && lr.ldl !== null) setLdl(String(lr.ldl));
-          if (lr.creatinine !== undefined && lr.creatinine !== null) setCreatinine(String(lr.creatinine));
-          if (lr.bun !== undefined && lr.bun !== null) setBun(String(lr.bun));
-          if (lr.egfr !== undefined && lr.egfr !== null) setEgfr(String(lr.egfr));
-          if (lr.sgot !== undefined && lr.sgot !== null) setSgot(String(lr.sgot));
-          if (lr.sgpt !== undefined && lr.sgpt !== null) setSgpt(String(lr.sgpt));
-          if (lr.uricAcid !== undefined && lr.uricAcid !== null) setUricAcid(String(lr.uricAcid));
-          if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) setHemoglobin(String(lr.hemoglobin));
-          if (lr.wbc !== undefined && lr.wbc !== null) setWbc(String(lr.wbc));
-          if (lr.platelet !== undefined && lr.platelet !== null) setPlatelet(String(lr.platelet));
-
-          if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
+        if (localParsed.labResults) {
+          const lr = localParsed.labResults;
+          if (lr.fbs) setFbs(String(lr.fbs));
+          if (lr.hba1c) setHba1c(String(lr.hba1c));
+          if (lr.cholesterol) setCholesterol(String(lr.cholesterol));
+          if (lr.triglyceride) setTriglyceride(String(lr.triglyceride));
+          if (lr.hdl) setHdl(String(lr.hdl));
+          if (lr.ldl) setLdl(String(lr.ldl));
+          if (lr.creatinine) setCreatinine(String(lr.creatinine));
+          if (lr.egfr) setEgfr(String(lr.egfr));
+          if (lr.bun) setBun(String(lr.bun));
+          if (lr.sgot) setSgot(String(lr.sgot));
+          if (lr.sgpt) setSgpt(String(lr.sgpt));
+          if (lr.uricAcid) setUricAcid(String(lr.uricAcid));
+          if (lr.customItems && lr.customItems.length > 0) {
             setCustomItems(lr.customItems);
           }
+          hasLocalData = true;
         }
+      }
 
+      // 3. Convert to base64 if small enough (< 8MB)
+      let base64Data = "";
+      if (file.size < 8 * 1024 * 1024) {
+        base64Data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string) || "");
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(file);
+        });
+      }
+
+      // 4. Send request to backend API
+      let serverParsedSuccess = false;
+      try {
+        const res = await fetch("/api/ai/parse-lab-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileData: base64Data,
+            fileType: file.type || "application/pdf",
+            fileName: file.name,
+            textContent: extractedText,
+          }),
+        });
+
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            const parsed = data.data;
+
+            if (parsed.title) setTitle(parsed.title);
+            if (parsed.hospital) setHospital(parsed.hospital);
+            if (parsed.patientName) setPatientName(parsed.patientName);
+            if (parsed.date) setDate(parsed.date);
+            if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
+            if (parsed.doctorNotes) setDoctorNotes(parsed.doctorNotes);
+
+            if (parsed.labResults) {
+              const lr = parsed.labResults;
+              if (lr.fbs !== undefined && lr.fbs !== null) setFbs(String(lr.fbs));
+              if (lr.hba1c !== undefined && lr.hba1c !== null) setHba1c(String(lr.hba1c));
+              if (lr.cholesterol !== undefined && lr.cholesterol !== null) setCholesterol(String(lr.cholesterol));
+              if (lr.triglyceride !== undefined && lr.triglyceride !== null) setTriglyceride(String(lr.triglyceride));
+              if (lr.hdl !== undefined && lr.hdl !== null) setHdl(String(lr.hdl));
+              if (lr.ldl !== undefined && lr.ldl !== null) setLdl(String(lr.ldl));
+              if (lr.creatinine !== undefined && lr.creatinine !== null) setCreatinine(String(lr.creatinine));
+              if (lr.bun !== undefined && lr.bun !== null) setBun(String(lr.bun));
+              if (lr.egfr !== undefined && lr.egfr !== null) setEgfr(String(lr.egfr));
+              if (lr.sgot !== undefined && lr.sgot !== null) setSgot(String(lr.sgot));
+              if (lr.sgpt !== undefined && lr.sgpt !== null) setSgpt(String(lr.sgpt));
+              if (lr.uricAcid !== undefined && lr.uricAcid !== null) setUricAcid(String(lr.uricAcid));
+              if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) setHemoglobin(String(lr.hemoglobin));
+              if (lr.wbc !== undefined && lr.wbc !== null) setWbc(String(lr.wbc));
+              if (lr.platelet !== undefined && lr.platelet !== null) setPlatelet(String(lr.platelet));
+
+              if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
+                setCustomItems(lr.customItems);
+              }
+            }
+            serverParsedSuccess = true;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("Server AI Lab parse request error, using client extraction fallback:", apiErr);
+      }
+
+      if (serverParsedSuccess || hasLocalData) {
         setIsAiParsed(true);
-        setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! กรุณาตรวจสอบความถูกต้อง 100% ด้านล่างก่อนบันทึก`);
+        setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! ตรวจสอบค่าที่ถอดมาและกดบันทึกได้ทันที`);
       } else {
-        setUploadError(data.error || "ไม่สามารถถอดข้อมูลจากไฟล์ PDF ได้");
+        setUploadError("ไม่สามารถถอดข้อมูลตัวเลขจากไฟล์นี้ได้โดยอัตโนมัติ กรุณากรอกข้อมูลในแบบฟอร์มด้วยตนเอง หรือลองใช้ไฟล์ PDF ผลแล็บฉบับทางการ");
       }
     } catch (err: any) {
-      setUploadError("เกิดข้อผิดพลาดในการโหลดไฟล์ PDF: " + err.message);
+      setUploadError("เกิดข้อผิดพลาดในการถอดข้อมูลไฟล์ PDF: " + err.message);
     } finally {
       setIsUploading(false);
     }

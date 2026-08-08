@@ -10,6 +10,18 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+  // Handle payload / body parser errors with JSON instead of HTML
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err) {
+      console.error("Express Request Error:", err.message);
+      return res.status(err.status || 400).json({
+        success: false,
+        error: "เกิดข้อผิดพลาดในการส่งข้อมูลไฟล์: " + (err.message || "Payload Error"),
+      });
+    }
+    next();
+  });
+
   // In-memory cloud backup store for multi-profile sync
   const cloudStorageMemory: Record<string, any> = {};
 
@@ -216,6 +228,11 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
 }
 ชื่อไฟล์: ${fileName || "document.pdf"}`;
 
+      let finalPrompt = promptText;
+      if (textContent) {
+        finalPrompt += `\n\nข้อความสกัดจากเอกสาร:\n${textContent}`;
+      }
+
       let contents: any[] = [];
       if (fileData && fileData.includes("base64,")) {
         const base64Clean = fileData.split("base64,")[1];
@@ -227,10 +244,10 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
               data: base64Clean,
             },
           },
-          { text: promptText },
+          { text: finalPrompt },
         ];
       } else if (textContent) {
-        contents = [{ text: `${promptText}\n\nข้อความสกัดจากเอกสาร:\n${textContent}` }];
+        contents = [{ text: finalPrompt }];
       } else {
         return res.status(400).json({ success: false, error: "กรุณาส่งไฟล์ PDF หรือข้อความในเอกสาร" });
       }
