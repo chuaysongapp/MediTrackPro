@@ -214,29 +214,37 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
             if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
             if (parsed.doctorNotes) setDoctorNotes(parsed.doctorNotes);
 
+            let extractedCount = 0;
+
             if (parsed.labResults) {
               const lr = parsed.labResults;
-              if (lr.fbs !== undefined && lr.fbs !== null) setFbs(String(lr.fbs));
-              if (lr.hba1c !== undefined && lr.hba1c !== null) setHba1c(String(lr.hba1c));
-              if (lr.cholesterol !== undefined && lr.cholesterol !== null) setCholesterol(String(lr.cholesterol));
-              if (lr.triglyceride !== undefined && lr.triglyceride !== null) setTriglyceride(String(lr.triglyceride));
-              if (lr.hdl !== undefined && lr.hdl !== null) setHdl(String(lr.hdl));
-              if (lr.ldl !== undefined && lr.ldl !== null) setLdl(String(lr.ldl));
-              if (lr.creatinine !== undefined && lr.creatinine !== null) setCreatinine(String(lr.creatinine));
-              if (lr.bun !== undefined && lr.bun !== null) setBun(String(lr.bun));
-              if (lr.egfr !== undefined && lr.egfr !== null) setEgfr(String(lr.egfr));
-              if (lr.sgot !== undefined && lr.sgot !== null) setSgot(String(lr.sgot));
-              if (lr.sgpt !== undefined && lr.sgpt !== null) setSgpt(String(lr.sgpt));
-              if (lr.uricAcid !== undefined && lr.uricAcid !== null) setUricAcid(String(lr.uricAcid));
-              if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) setHemoglobin(String(lr.hemoglobin));
-              if (lr.wbc !== undefined && lr.wbc !== null) setWbc(String(lr.wbc));
-              if (lr.platelet !== undefined && lr.platelet !== null) setPlatelet(String(lr.platelet));
+              if (lr.fbs !== undefined && lr.fbs !== null) { setFbs(String(lr.fbs)); extractedCount++; }
+              if (lr.hba1c !== undefined && lr.hba1c !== null) { setHba1c(String(lr.hba1c)); extractedCount++; }
+              if (lr.cholesterol !== undefined && lr.cholesterol !== null) { setCholesterol(String(lr.cholesterol)); extractedCount++; }
+              if (lr.triglyceride !== undefined && lr.triglyceride !== null) { setTriglyceride(String(lr.triglyceride)); extractedCount++; }
+              if (lr.hdl !== undefined && lr.hdl !== null) { setHdl(String(lr.hdl)); extractedCount++; }
+              if (lr.ldl !== undefined && lr.ldl !== null) { setLdl(String(lr.ldl)); extractedCount++; }
+              if (lr.creatinine !== undefined && lr.creatinine !== null) { setCreatinine(String(lr.creatinine)); extractedCount++; }
+              if (lr.bun !== undefined && lr.bun !== null) { setBun(String(lr.bun)); extractedCount++; }
+              if (lr.egfr !== undefined && lr.egfr !== null) { setEgfr(String(lr.egfr)); extractedCount++; }
+              if (lr.sgot !== undefined && lr.sgot !== null) { setSgot(String(lr.sgot)); extractedCount++; }
+              if (lr.sgpt !== undefined && lr.sgpt !== null) { setSgpt(String(lr.sgpt)); extractedCount++; }
+              if (lr.uricAcid !== undefined && lr.uricAcid !== null) { setUricAcid(String(lr.uricAcid)); extractedCount++; }
+              if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) { setHemoglobin(String(lr.hemoglobin)); extractedCount++; }
+              if (lr.wbc !== undefined && lr.wbc !== null) { setWbc(String(lr.wbc)); extractedCount++; }
+              if (lr.platelet !== undefined && lr.platelet !== null) { setPlatelet(String(lr.platelet)); extractedCount++; }
 
               if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
                 setCustomItems(lr.customItems);
+                extractedCount += lr.customItems.length;
               }
             }
             serverParsedSuccess = true;
+            if (extractedCount > 0 || parsed.hospital || parsed.patientName) {
+              setUploadSuccess(`วิเคราะห์และดึงข้อมูลจากไฟล์ "${file.name}" สำเร็จ (${extractedCount > 0 ? `${extractedCount} รายการผลแล็บ` : 'ข้อมูลเบื้องต้น'})! กรุณาตรวจสอบและปรับแก้ไขในแบบฟอร์มด้านล่างได้ทันที`);
+            } else {
+              setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
+            }
           }
         }
       } catch (apiErr) {
@@ -246,16 +254,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
       setIsAiParsed(true);
       setUploadError("");
 
-      // Calculate total extracted numeric lab items
-      const hasAnyExtractedValues = Boolean(
-        fbs || hba1c || cholesterol || triglyceride || hdl || ldl ||
-        creatinine || bun || egfr || sgot || sgpt || uricAcid ||
-        hemoglobin || wbc || platelet || customItems.length > 0
-      );
-
-      if (serverParsedSuccess || hasAnyExtractedValues) {
-        setUploadSuccess(`วิเคราะห์ไฟล์ "${file.name}" เรียบร้อยแล้ว! กรุณาตรวจสอบข้อมูลที่สกัดได้ในแบบฟอร์มด้านล่าง`);
-      } else {
+      if (!serverParsedSuccess) {
         setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
       }
     } catch (err: any) {

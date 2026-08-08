@@ -235,21 +235,8 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
 
       const parts: any[] = [];
 
-      // 1. If rendered page images are available
-      if (Array.isArray(pageImages) && pageImages.length > 0) {
-        for (const imgDataUrl of pageImages) {
-          if (imgDataUrl && imgDataUrl.includes("base64,")) {
-            parts.push({
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: imgDataUrl.split("base64,")[1],
-              },
-            });
-          }
-        }
-      } 
-      // 2. Fallback to raw fileData if single file/image
-      else if (fileData && fileData.includes("base64,")) {
+      // 1. Raw PDF / Image inline base64 if present
+      if (fileData && fileData.includes("base64,")) {
         const base64Clean = fileData.split("base64,")[1];
         let mime = fileType;
         if (!mime || mime === "application/octet-stream" || mime === "") {
@@ -266,7 +253,28 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
         });
       }
 
+      // 2. Rendered page images if available
+      if (Array.isArray(pageImages) && pageImages.length > 0) {
+        for (const imgDataUrl of pageImages) {
+          if (imgDataUrl && imgDataUrl.includes("base64,")) {
+            parts.push({
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: imgDataUrl.split("base64,")[1],
+              },
+            });
+          }
+        }
+      }
+
       parts.push({ text: finalPrompt });
+
+      const contents = [
+        {
+          role: "user",
+          parts: parts,
+        },
+      ];
 
       let rawText = "";
       const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
@@ -275,7 +283,7 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
         try {
           const response = await ai.models.generateContent({
             model: modelName,
-            contents: { parts },
+            contents: contents,
             config: {
               systemInstruction,
               temperature: 0.1,
@@ -285,17 +293,17 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
           rawText = response.text || "";
           if (rawText) break;
         } catch (mErr: any) {
-          console.warn(`Model ${modelName} parse lab warning:`, mErr?.message || mErr);
+          console.warn(`Model ${modelName} parse lab JSON mode warning:`, mErr?.message || mErr);
         }
       }
 
       if (!rawText) {
-        // Fallback with contents array
+        // Fallback without responseMimeType
         for (const modelName of modelsToTry) {
           try {
             const response = await ai.models.generateContent({
               model: modelName,
-              contents: parts,
+              contents: contents,
               config: {
                 systemInstruction,
                 temperature: 0.1,
