@@ -1,13 +1,12 @@
 import * as pdfjsLib from "pdfjs-dist";
+// Bundle the PDF.js worker with the app build (Vite emits it as an asset and
+// resolves the correct path even on GitHub Pages sub-paths). This replaces the
+// previous CDN URL that pointed at pdf.worker.min.js — a file that no longer
+// exists in pdfjs-dist v4+ (the worker is now an ES module: pdf.worker.min.mjs).
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-// Configure worker URL for browser environments with resilient fallbacks
 if (typeof window !== "undefined" && pdfjsLib.GlobalWorkerOptions) {
-  try {
-    const version = pdfjsLib.version || "3.11.174";
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.js`;
-  } catch (e) {
-    console.warn("PDF.js worker setup fallback notice:", e);
-  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 }
 
 export async function extractTextFromPdfFile(file: File): Promise<string> {
@@ -18,18 +17,17 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
       useSystemFonts: true,
       isEvalSupported: false,
     });
-    
+
     const pdf = await loadingTask.promise;
     let fullText = "";
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
-      
+
       const items = textContent.items as any[];
       if (!items || items.length === 0) continue;
 
-      // Extract items with position coordinates (x = transform[4], y = transform[5])
       const posItems = items
         .filter((item: any) => item && typeof item.str === "string" && item.str.length > 0)
         .map((item: any) => ({
@@ -39,30 +37,24 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
         }))
         .filter(i => i.str.length > 0);
 
-      // Sort by Y coordinate descending (top of page to bottom)
+      // Sort top-to-bottom
       posItems.sort((a, b) => b.y - a.y);
 
-      // Group items into lines where Y difference <= 8 points (more lenient for varied font baselines)
+      // Group into lines (Y within 8pt)
       const lineGroups: typeof posItems[] = [];
       for (const item of posItems) {
         const existingLine = lineGroups.find(g => Math.abs(g[0].y - item.y) <= 8);
-        if (existingLine) {
-          existingLine.push(item);
-        } else {
-          lineGroups.push([item]);
-        }
+        if (existingLine) existingLine.push(item);
+        else lineGroups.push([item]);
       }
 
-      // Sort items within each line left-to-right (by X coordinate)
+      // Sort each line left-to-right
       const pageLines = lineGroups.map(line => {
         line.sort((a, b) => a.x - b.x);
         return line.map(i => i.str).join(" ").replace(/\s+/g, " ").trim();
       }).filter(lineStr => lineStr.length > 0);
 
-      const pageText = pageLines.join("\n");
-      const rawWordStream = posItems.map(i => i.str).join(" ");
-
-      fullText += `--- Page ${pageNum} ---\n` + pageText + "\n" + rawWordStream + "\n\n";
+      fullText += `--- Page ${pageNum} ---\n` + pageLines.join("\n") + "\n\n";
     }
 
     return fullText.trim();
@@ -80,7 +72,7 @@ export async function renderPdfPagesToImages(file: File, maxPages = 3): Promise<
       useSystemFonts: true,
       isEvalSupported: false,
     });
-    
+
     const pdf = await loadingTask.promise;
     const pageImages: string[] = [];
     const pagesToRender = Math.min(pdf.numPages, maxPages);
@@ -90,7 +82,7 @@ export async function renderPdfPagesToImages(file: File, maxPages = 3): Promise<
       const viewport = page.getViewport({ scale: 1.5 });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
-      
+
       if (context) {
         canvas.width = viewport.width;
         canvas.height = viewport.height;
@@ -99,9 +91,8 @@ export async function renderPdfPagesToImages(file: File, maxPages = 3): Promise<
           viewport: viewport,
           canvas: canvas,
         } as any).promise;
-        
-        const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.85);
-        pageImages.push(jpegDataUrl);
+
+        pageImages.push(canvas.toDataURL("image/jpeg", 0.85));
       }
     }
     return pageImages;
@@ -145,230 +136,175 @@ export interface ParsedLabReport {
 }
 
 /**
- * Clean reference ranges and non-value numbers from a block of text
+ * Row-aware lab parser.
+ *
+ * Lab reports (e.g. Ramathibodi) are tabular: each result sits on its own line as
+ *   <TestName> [H|L] <Value> <Unit> [<Reference range>]
+ * We anchor the numeric VALUE to the token immediately before a known unit, so we
+ * never grab a reference-range number, an "ISO 15189" document number, or a value
+ * from the wrong row. Test names are matched by anchored keywords (word boundaries),
+ * so "Hb" can't match inside "HbA1C" and "Cl" can't match inside "Clinic".
  */
-function extractCandidateNumbers(block: string): number[] {
-  if (!block) return [];
 
-  let clean = block;
+const UNIT = String.raw`(?:%|mg\/dL|g\/dL|mg\/g|mmol\/L|mEq\/L|mIU\/L|IU\/L|U\/L|ml\/min|umol\/L|micro\s?mol\/L|10\^3\/uL|10\^6\/uL|\/uL|fL|pg|g\/L)`;
+// value must sit directly before a unit; lookahead allows space, "[", "/" (ml/min/1.73) or EOL
+const ROW_RE = new RegExp(String.raw`^(.+?)\s+(?:([HL])\s+)?(-?\d+(?:\.\d+)?)\s+(${UNIT})(?=[\s\[/]|$)`, "i");
 
-  // 1. Remove obvious date strings e.g. 08/08/2026, 2026-08-08, 2569/08/08
-  clean = clean.replace(/\b\d{1,4}[\/\.-]\d{1,2}[\/\.-]\d{1,4}\b/g, " ");
+// Substrings that mark a header / footer / metadata line (checked only on lines
+// that already produced a value+unit, so this is a light safety net).
+const HEADER_WORDS = [
+  "reported", "printed", "approved", "clinic", "lab no", "parameters", "reference",
+  "hospital", " hn", "loc:", "dr:", "age :", "dispatch", "received", "page", "tel.",
+  "iso", "กทม", "พระราม", "ภาควิชา", "คณะ", "ใบรายงาน", "หมายเหตุ", "ชื่อการทดสอบ",
+];
 
-  // 2. Remove explicit range patterns like "70 - 99", "70.0 - 99.0", "70.0-99.0", "4.0-6.0", "13.5-17.5"
-  clean = clean.replace(/\d+(?:\.\d+)?\s*[-–—~]\s*\d+(?:\.\d+)?/g, " ");
-
-  // 3. Remove comparison operator ranges like "< 200", "<200", "> 40", ">= 60", "<= 100"
-  clean = clean.replace(/(?:<|>|<=|>=)\s*\d+(?:\.\d+)?/gi, " ");
-
-  // 4. Remove reference range headers / brackets if they don't contain sole numbers
-  clean = clean.replace(/Ref(?:erence)?\s*Range[^\n\r]*/gi, " ");
-
-  // 5. Remove unit multipliers e.g. 1.73m2, 10^3, 10^6, /uL
-  clean = clean.replace(/1\.73\s*m\^?2?/gi, " ").replace(/10\^\d+/g, " ");
-
-  // Find all remaining numeric tokens
-  const tokens = clean.match(/\b\d+(?:\.\d+)?\b/g);
-  if (!tokens) return [];
-
-  const candidates: number[] = [];
-  for (const t of tokens) {
-    const num = parseFloat(t);
-    if (!isNaN(num) && num >= 0 && num < 100000) {
-      // Ignore Thai Buddhist years (2550 - 2575) if integer
-      if (num >= 2550 && num <= 2575 && Number.isInteger(num)) continue;
-      // Ignore common page numbers or document years
-      if (num >= 2020 && num <= 2030 && Number.isInteger(num)) continue;
-      candidates.push(num);
-    }
-  }
-
-  return candidates;
+function flagFromLetter(f?: string): "normal" | "high" | "low" {
+  if (!f) return "normal";
+  const u = f.toUpperCase();
+  return u === "H" ? "high" : u === "L" ? "low" : "normal";
 }
 
-/**
- * Smart multi-strategy lab value finder for client-side text parsing.
- * Supports row-by-row, colon-separated, and multi-line sliding windows (up to 12 lines).
- */
-function findLabValueInText(text: string, aliases: string[]): number | undefined {
-  if (!text) return undefined;
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+interface LabRow {
+  name: string;
+  flag?: string;
+  value: number;
+  unit: string;
+}
 
-  // Strategy 1: Direct Line Matching (Search line containing alias)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const lowerLine = line.toLowerCase();
-
-    for (const alias of aliases) {
-      const lowerAlias = alias.toLowerCase();
-      if (lowerLine.includes(lowerAlias)) {
-        // Try extracting numbers from the same line first
-        const numsOnLine = extractCandidateNumbers(line);
-        if (numsOnLine.length > 0) {
-          return numsOnLine[0];
-        }
-
-        // Strategy 2: Multi-line window search (Look up to 8 lines ahead for table/column splits)
-        const windowLines = lines.slice(i, Math.min(i + 8, lines.length));
-        const windowText = windowLines.join(" ");
-        const numsInWindow = extractCandidateNumbers(windowText);
-        if (numsInWindow.length > 0) {
-          return numsInWindow[0];
-        }
-      }
-    }
+function parseRows(text: string): LabRow[] {
+  const rows: LabRow[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(ROW_RE);
+    if (!m) continue;
+    const name = m[1].trim();
+    const lower = name.toLowerCase();
+    if (HEADER_WORDS.some(w => lower.includes(w.trim()))) continue;
+    const value = parseFloat(m[3]);
+    if (isNaN(value)) continue;
+    rows.push({ name, flag: m[2], value, unit: m[4] });
   }
+  return rows;
+}
 
-  return undefined;
+type StdKey =
+  | "fbs" | "hba1c" | "cholesterol" | "triglyceride" | "hdl" | "ldl"
+  | "creatinine" | "bun" | "egfr" | "sgot" | "sgpt" | "uricAcid"
+  | "hemoglobin" | "wbc" | "platelet";
+
+/** Map a row's test name to a standard field key, or null (=> handle as custom / skip). */
+function classifyStandard(name: string, unit: string): StdKey | null {
+  const n = name.toLowerCase().replace(/\s+/g, " ").trim();
+  const u = unit.toLowerCase();
+  if (/hba1c/.test(n)) return "hba1c";
+  if (/estimated average glucose|^eag\b/.test(n)) return null;              // calculated -> custom
+  if (/glucose/.test(n) && /naf/.test(n)) return "fbs";                     // Glucose (NaF) = fasting
+  if (/^glucose$/.test(n) && u.includes("mg/dl")) return "fbs";
+  if (/fasting|^fbs$|^fpg$/.test(n)) return "fbs";
+  if (/non-?hdl/.test(n)) return null;                                      // calculated -> custom
+  if (/hdl/.test(n) && /chol/.test(n)) return "hdl";
+  if (/ldl/.test(n) && /chol/.test(n)) return "ldl";
+  if (/^cholesterol$|total cholesterol/.test(n)) return "cholesterol";
+  if (/triglyceride/.test(n)) return "triglyceride";
+  if (/urine creatinine/.test(n) || /albumin\/creatinine/.test(n)) return null; // -> custom
+  if (/^creatinine$/.test(n)) return "creatinine";
+  if (/egfr|e-gfr|^gfr$|ckd-epi/.test(n)) return "egfr";
+  if (/\bbun\b|blood urea|urea nitrogen/.test(n)) return "bun";
+  if (/\bsgot\b|\bast\b/.test(n)) return "sgot";
+  if (/\bsgpt\b|\balt\b/.test(n)) return "sgpt";
+  if (/uric/.test(n)) return "uricAcid";
+  if (/^hemoglobin$|^hb$|^hgb$/.test(n)) return "hemoglobin";
+  if (/^wbc$|white blood/.test(n) && !u.includes("hpf")) return "wbc";
+  if (/platelet|^plt$/.test(n)) return "platelet";
+  return null;
+}
+
+/** Nice display label for known custom items; else the original name. */
+function customLabel(name: string): string {
+  const n = name.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/estimated average glucose|^eag\b/.test(n)) return "Estimated Average Glucose (eAG)";
+  if (/^sodium$|^na$/.test(n)) return "Sodium (โซเดียม)";
+  if (/^potassium$|^k$/.test(n)) return "Potassium (โพแทสเซียม)";
+  if (/^chloride$|^cl$/.test(n)) return "Chloride (คลอไรด์)";
+  if (/carbondioxide|bicarbonate|^co2$/.test(n)) return "Carbondioxide (คาร์บอนไดออกไซด์)";
+  if (/anion gap/.test(n)) return "Anion gap (ค่าคำนวณ)";
+  if (/non-?hdl/.test(n)) return "Non-HDL-c (ค่าคำนวณ)";
+  if (/albumin\/creatinine/.test(n)) return "Albumin/Creatinine Ratio";
+  if (/urine creatinine/.test(n)) return "Urine Creatinine";
+  if (/albumin urine|urine albumin/.test(n)) return "Albumin Urine";
+  if (/alkaline phosphatase|^alp$/.test(n)) return "Alkaline Phosphatase (ALP)";
+  return name.trim();
+}
+
+/** Which non-standard rows are worth keeping as custom items (avoids noise). */
+function isWantedCustom(name: string): boolean {
+  const n = name.toLowerCase().replace(/\s+/g, " ").trim();
+  return /estimated average glucose|^eag\b|^sodium$|^na$|^potassium$|^k$|^chloride$|^cl$|carbondioxide|bicarbonate|^co2$|anion gap|non-?hdl|albumin\/creatinine|urine creatinine|albumin urine|urine albumin|bilirubin|alkaline phosphatase|^alp$|^uric/.test(n);
 }
 
 export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLabReport {
-  const result: ParsedLabReport = {
-    labResults: {
-      customItems: [],
-    },
-  };
-
+  const result: ParsedLabReport = { labResults: { customItems: [] } };
   if (!text) return result;
 
-  // 1. Hospital Name Detection
-  if (/รามาธิบดี|RAMA/i.test(text)) {
-    result.hospital = "คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี";
-  } else if (/ศิริราช|Siriraj/i.test(text)) {
-    result.hospital = "โรงพยาบาลศิริราช";
-  } else if (/จุฬา|Chulalongkorn/i.test(text)) {
-    result.hospital = "โรงพยาบาลจุฬาลงกรณ์";
-  } else if (/กรุงเทพ|Bangkok/i.test(text)) {
-    result.hospital = "โรงพยาบาลกรุงเทพ";
-  } else if (/บำรุงราษฎร์|Bumrungrad/i.test(text)) {
-    result.hospital = "โรงพยาบาลบำรุงราษฎร์";
-  } else if (/พญาไท|Phyathai/i.test(text)) {
-    result.hospital = "โรงพยาบาลพญาไท";
-  } else if (/สมิติเวช|Samitivej/i.test(text)) {
-    result.hospital = "โรงพยาบาลสมิติเวช";
-  } else if (/พระราม|Praram/i.test(text)) {
-    result.hospital = "โรงพยาบาลพระรามเก้า";
-  } else {
-    const hMatch = text.match(/(?:โรงพยาบาล|คลินิก|ศูนย์แล็บ|ห้องปฏิบัติการ|Hospital|Clinic|Lab)\s*[:\s]*([ก-๙a-zA-Z0-9\s]+)/i);
-    if (hMatch && hMatch[1]) result.hospital = hMatch[0].trim();
+  // 1. Hospital
+  if (/รามาธิบดี|RAMA/i.test(text)) result.hospital = "คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี";
+  else if (/ศิริราช|Siriraj/i.test(text)) result.hospital = "โรงพยาบาลศิริราช";
+  else if (/จุฬา|Chulalongkorn/i.test(text)) result.hospital = "โรงพยาบาลจุฬาลงกรณ์";
+  else if (/บำรุงราษฎร์|Bumrungrad/i.test(text)) result.hospital = "โรงพยาบาลบำรุงราษฎร์";
+  else if (/สมิติเวช|Samitivej/i.test(text)) result.hospital = "โรงพยาบาลสมิติเวช";
+  else if (/กรุงเทพ|Bangkok/i.test(text)) result.hospital = "โรงพยาบาลกรุงเทพ";
+  else if (/พญาไท|Phyathai/i.test(text)) result.hospital = "โรงพยาบาลพญาไท";
+  else if (/พระราม\s*9|Praram/i.test(text)) result.hospital = "โรงพยาบาลพระรามเก้า";
+  else {
+    const hMatch = text.match(/(?:โรงพยาบาล|คลินิก|Hospital|Clinic)\s*[:\s]*([ก-๙a-zA-Z0-9\s]+)/i);
+    if (hMatch && hMatch[0]) result.hospital = hMatch[0].trim();
   }
 
-  // 2. Patient Name Detection
-  const nameMatch = text.match(/(?:นาย|นาง|นางสาว|เด็กชาย|เด็กหญิง|คุณ|Mr\.|Mrs\.|Ms\.|Name|ชื่อ-สกุล|ชื่อผู้ป่วย)\s*[:\s]*([ก-๙a-zA-Z\s\.\'\-\/]+?)(?=\s{2,}|\n|\r|\d{2,}|Age|HN|Loc|202|201|256|257|$)/i);
+  // 2. Patient name
+  const nameMatch = text.match(/(?:นาย|นาง|นางสาว|เด็กชาย|เด็กหญิง|Mr\.|Mrs\.|Ms\.)\s*([ก-๙a-zA-Z\s\.\'\-]+?)(?=\s{2,}|\n|\r|Age|HN|Loc|Dr|202|256|$)/);
   if (nameMatch && nameMatch[1]) {
-    const rawName = nameMatch[1].trim();
-    if (rawName.length >= 2 && rawName.length <= 60) {
-      result.patientName = rawName;
-    }
+    const raw = nameMatch[1].trim();
+    if (raw.length >= 2 && raw.length <= 60) result.patientName = raw;
   }
 
-  // 3. Date Detection (Supports YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY and Thai BE Years 2560-2575)
-  const dateMatch = text.match(/(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2}|25\d{2})/) ||
-                    text.match(/(20\d{2}|25\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (dateMatch) {
-    let yearNum = 2026;
-    let monthStr = "01";
-    let dayStr = "01";
-
-    if (dateMatch[1].length === 4) {
-      yearNum = parseInt(dateMatch[1]);
-      monthStr = dateMatch[2].padStart(2, "0");
-      dayStr = dateMatch[3].padStart(2, "0");
-    } else {
-      yearNum = parseInt(dateMatch[3]);
-      monthStr = dateMatch[2].padStart(2, "0");
-      dayStr = dateMatch[1].padStart(2, "0");
-    }
-
-    if (yearNum >= 2400 && yearNum <= 2650) {
-      yearNum -= 543; // Convert Thai BE to AD
-    }
-    result.date = `${yearNum}-${monthStr}-${dayStr}`;
+  // 3. Date -> AD YYYY-MM-DD (handles Thai BE)
+  const dm = text.match(/(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2}|25\d{2})/) ||
+             text.match(/(20\d{2}|25\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (dm) {
+    let y = 2026, mo = "01", d = "01";
+    if (dm[1].length === 4) { y = parseInt(dm[1]); mo = dm[2].padStart(2, "0"); d = dm[3].padStart(2, "0"); }
+    else { y = parseInt(dm[3]); mo = dm[2].padStart(2, "0"); d = dm[1].padStart(2, "0"); }
+    if (y >= 2400 && y <= 2650) y -= 543;
+    result.date = `${y}-${mo}-${d}`;
   }
 
-  const lr: NonNullable<ParsedLabReport["labResults"]> = { customItems: [] };
+  // 4. Row-based lab value extraction
+  const lr = result.labResults!;
+  const rows = parseRows(text);
+  const seenCustom = new Set<string>();
 
-  // 4. Standard Blood Lab Items Extraction (English & Thai Aliases)
-  lr.fbs = findLabValueInText(text, ["Fasting Blood Sugar", "Fasting Glucose", "Glucose", "FBS", "Blood Sugar", "น้ำตาลในเลือด", "น้ำตาล", "FPG", "GLU"]);
-  lr.hba1c = findLabValueInText(text, ["HbA1c", "Hemoglobin A1c", "A1C", "Glycated Hemoglobin", "น้ำตาลสะสม", "Hb A1c"]);
-  lr.cholesterol = findLabValueInText(text, ["Total Cholesterol", "Cholesterol", "CHOL", "ไขมันรวม", "คอเลสเตอรอล"]);
-  lr.triglyceride = findLabValueInText(text, ["Triglyceride", "Triglycerides", "TRIG", "ไตรกลีเซอไรด์"]);
-  lr.hdl = findLabValueInText(text, ["HDL-Cholesterol", "HDL-C", "HDL", "ไขมันดี", "เอชดีแอล"]);
-  lr.ldl = findLabValueInText(text, ["LDL-Cholesterol", "LDL-C", "LDL", "Direct LDL", "ไขมันเลว", "แอลดีแอล"]);
-  lr.creatinine = findLabValueInText(text, ["Creatinine", "Cr", "Blood Creatinine", "ครีเอตินีน", "ค่าไต"]);
-  lr.egfr = findLabValueInText(text, ["eGFR", "e-GFR", "GFR", "Estimated GFR", "CKD-EPI", "อัตราการกรองของไต"]);
-  lr.bun = findLabValueInText(text, ["BUN", "Blood Urea Nitrogen", "Urea", "ยูเรียไนโตรเจน"]);
-  lr.sgot = findLabValueInText(text, ["SGOT", "AST", "เอสจีโอที", "เอเอสที"]);
-  lr.sgpt = findLabValueInText(text, ["SGPT", "ALT", "เอสจีพีที", "เอแอลที"]);
-  lr.uricAcid = findLabValueInText(text, ["Uric Acid", "Uric", "กรดยูริก"]);
-  lr.hemoglobin = findLabValueInText(text, ["Hemoglobin", "Hb", "HGB", "ฮีโมโกลบิน", "ความเข้มข้นของเลือด"]);
-  lr.wbc = findLabValueInText(text, ["WBC", "White Blood Cell", "White Blood Cells", "เม็ดเลือดขาว"]);
-  lr.platelet = findLabValueInText(text, ["Platelet", "Platelets", "PLT", "เกล็ดเลือด"]);
-
-  // 5. Custom Tests Extraction
-  const customTests = [
-    { name: "Estimated Average Glucose (eAG)", unit: "mg/dL", aliases: ["Estimated Average Glucose", "eAG"] },
-    { name: "Sodium (โซเดียม)", unit: "mmol/L", aliases: ["Sodium", "Na"] },
-    { name: "Potassium (โพแทสเซียม)", unit: "mmol/L", aliases: ["Potassium", "K"] },
-    { name: "Chloride (คลอไรด์)", unit: "mmol/L", aliases: ["Chloride", "Cl"] },
-    { name: "Carbondioxide (คาร์บอนไดออกไซด์)", unit: "mmol/L", aliases: ["Carbondioxide", "CO2", "Bicarbonate"] },
-    { name: "Albumin/Creatinine Ratio", unit: "mg/g", aliases: ["Albumin/Creatinine Ratio", "Urine Alb/Cr"] },
-    { name: "Albumin Urine", unit: "mg/dL", aliases: ["Albumin Urine", "Urine Albumin"] },
-    { name: "Direct Bilirubin", unit: "mg/dL", aliases: ["Direct Bilirubin", "D-Bilirubin"] },
-    { name: "Total Bilirubin", unit: "mg/dL", aliases: ["Total Bilirubin", "T-Bilirubin"] },
-    { name: "Alkaline Phosphatase (ALP)", unit: "U/L", aliases: ["Alkaline Phosphatase", "ALP"] },
-  ];
-
-  for (const t of customTests) {
-    const val = findLabValueInText(text, t.aliases);
-    if (val !== undefined) {
-      lr.customItems?.push({
-        testName: t.name,
-        resultValue: String(val),
-        unit: t.unit,
-        flag: "normal",
-      });
+  for (const row of rows) {
+    const key = classifyStandard(row.name, row.unit);
+    if (key) {
+      if ((lr as any)[key] === undefined) (lr as any)[key] = row.value; // first match wins
+      continue;
     }
-  }
-
-  // 6. Generic Table Row Extraction for any other lab tests
-  const lines = text.split(/\r?\n/);
-  const knownTokens = [
-    "fbs", "glucose", "glu", "hba1c", "cholesterol", "chol", "triglyceride", "triglycerides", "trig", "hdl", "ldl",
-    "creatinine", "cr", "egfr", "gfr", "bun", "sgot", "ast", "sgpt", "alt", "uric", "hemoglobin", "hb", "hgb",
-    "wbc", "platelet", "platelets", "plt", "hospital", "patient", "page", "date", "name", "age",
-    "รามาธิบดี", "ศิริราช", "จุฬา", "กรุงเทพ", "ผลตรวจ", "วันที่", "ชื่อ", "รายงาน"
-  ];
-
-  for (const line of lines) {
-    const cleanLine = line.trim();
-    // Pattern: [Test Name] [Numeric Value] [Unit]
-    const rowMatch = cleanLine.match(/^([A-Za-z0-9\s\(\)\/\-\._ก-๙]+?)\s+([0-9]+(?:\.[0-9]+)?)\s*(mg\/dL|g\/dL|%|U\/L|u\/l|IU\/L|mmol\/L|mEq\/L|fL|pg|g\/L|10\^3\/uL|10\^6\/uL|\/uL|\/mm3|mL\/min)(?:\s+.*)?$/i);
-    
-    if (rowMatch) {
-      const testName = rowMatch[1].trim();
-      const valStr = rowMatch[2];
-      const unitStr = rowMatch[3];
-
-      const lowerName = testName.toLowerCase();
-      const isKnown = knownTokens.some(tok => lowerName.includes(tok));
-
-      if (!isKnown && testName.length >= 2 && testName.length <= 40) {
-        const alreadyAdded = lr.customItems?.some(ci => ci.testName.toLowerCase() === testName.toLowerCase());
-        if (!alreadyAdded) {
-          lr.customItems?.push({
-            testName: testName,
-            resultValue: valStr,
-            unit: unitStr,
-            flag: "normal",
-          });
-        }
+    if (isWantedCustom(row.name)) {
+      const label = customLabel(row.name);
+      const dedupeKey = label.toLowerCase();
+      if (!seenCustom.has(dedupeKey)) {
+        seenCustom.add(dedupeKey);
+        lr.customItems!.push({
+          testName: label,
+          resultValue: String(row.value),
+          unit: row.unit,
+          flag: flagFromLetter(row.flag),
+        });
       }
     }
   }
 
-  result.labResults = lr;
   result.title = `ผลตรวจเลือดและเคมีคลินิก - ${result.hospital || fileName || "เอกสารทางการแพทย์"}`;
-
   return result;
 }
