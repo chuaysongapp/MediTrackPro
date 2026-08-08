@@ -109,7 +109,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
       let localParsed = parseLabTextWithRegex(extractedText, file.name);
       let hasLocalData = false;
 
-      if (extractedText && extractedText.length > 20) {
+      if (extractedText && extractedText.length > 10) {
         if (localParsed.hospital) setHospital(localParsed.hospital);
         if (localParsed.patientName) setPatientName(localParsed.patientName);
         if (localParsed.date) setDate(localParsed.date);
@@ -117,23 +117,34 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
 
         if (localParsed.labResults) {
           const lr = localParsed.labResults;
-          if (lr.fbs) setFbs(String(lr.fbs));
-          if (lr.hba1c) setHba1c(String(lr.hba1c));
-          if (lr.cholesterol) setCholesterol(String(lr.cholesterol));
-          if (lr.triglyceride) setTriglyceride(String(lr.triglyceride));
-          if (lr.hdl) setHdl(String(lr.hdl));
-          if (lr.ldl) setLdl(String(lr.ldl));
-          if (lr.creatinine) setCreatinine(String(lr.creatinine));
-          if (lr.egfr) setEgfr(String(lr.egfr));
-          if (lr.bun) setBun(String(lr.bun));
-          if (lr.sgot) setSgot(String(lr.sgot));
-          if (lr.sgpt) setSgpt(String(lr.sgpt));
-          if (lr.uricAcid) setUricAcid(String(lr.uricAcid));
+          if (lr.fbs !== undefined) setFbs(String(lr.fbs));
+          if (lr.hba1c !== undefined) setHba1c(String(lr.hba1c));
+          if (lr.cholesterol !== undefined) setCholesterol(String(lr.cholesterol));
+          if (lr.triglyceride !== undefined) setTriglyceride(String(lr.triglyceride));
+          if (lr.hdl !== undefined) setHdl(String(lr.hdl));
+          if (lr.ldl !== undefined) setLdl(String(lr.ldl));
+          if (lr.creatinine !== undefined) setCreatinine(String(lr.creatinine));
+          if (lr.egfr !== undefined) setEgfr(String(lr.egfr));
+          if (lr.bun !== undefined) setBun(String(lr.bun));
+          if (lr.sgot !== undefined) setSgot(String(lr.sgot));
+          if (lr.sgpt !== undefined) setSgpt(String(lr.sgpt));
+          if (lr.uricAcid !== undefined) setUricAcid(String(lr.uricAcid));
+          if (lr.hemoglobin !== undefined) setHemoglobin(String(lr.hemoglobin));
+          if (lr.wbc !== undefined) setWbc(String(lr.wbc));
+          if (lr.platelet !== undefined) setPlatelet(String(lr.platelet));
           if (lr.customItems && lr.customItems.length > 0) {
             setCustomItems(lr.customItems);
           }
-          hasLocalData = true;
         }
+
+        hasLocalData = Boolean(
+          localParsed.hospital ||
+          localParsed.patientName ||
+          localParsed.date ||
+          localParsed.title ||
+          (localParsed.labResults && Object.keys(localParsed.labResults).some(k => k !== 'customItems' && (localParsed.labResults as any)[k] !== undefined)) ||
+          (localParsed.labResults?.customItems && localParsed.labResults.customItems.length > 0)
+        );
       }
 
       // 3. Convert to base64 if small enough (< 8MB)
@@ -205,9 +216,10 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
 
       if (serverParsedSuccess || hasLocalData) {
         setIsAiParsed(true);
-        setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! ตรวจสอบค่าที่ถอดมาและกดบันทึกได้ทันที`);
+        setUploadError("");
+        setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! กรุณาตรวจสอบข้อมูลในแบบฟอร์มด้านล่างแล้วกดบันทึกได้ทันที`);
       } else {
-        setUploadError("ไม่สามารถถอดข้อมูลตัวเลขจากไฟล์นี้ได้โดยอัตโนมัติ กรุณากรอกข้อมูลในแบบฟอร์มด้วยตนเอง หรือลองใช้ไฟล์ PDF ผลแล็บฉบับทางการ");
+        setUploadError("ไม่สามารถถอดข้อมูลจากไฟล์นี้ได้โดยอัตโนมัติ กรุณากรอกข้อมูลในแบบฟอร์มด้วยตนเอง หรือลองใช้ไฟล์ PDF ผลแล็บฉบับทางการ");
       }
     } catch (err: any) {
       setUploadError("เกิดข้อผิดพลาดในการถอดข้อมูลไฟล์ PDF: " + err.message);

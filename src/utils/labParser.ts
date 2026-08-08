@@ -63,6 +63,57 @@ export interface ParsedLabReport {
   };
 }
 
+/**
+ * Smart line-by-line lab value finder.
+ * Strips out reference ranges in parentheses e.g. (70-99), (4.0-6.0)
+ * before searching for the actual test result number.
+ */
+function findLabValueInText(text: string, aliases: string[]): number | undefined {
+  const lines = text.split(/\r?\n/);
+  
+  // 1. Line-by-line search
+  for (const rawLine of lines) {
+    const hasAlias = aliases.some(alias => {
+      const reg = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      return reg.test(rawLine);
+    });
+
+    if (hasAlias) {
+      // Strip reference ranges inside parens or brackets: (70 - 100), (0.67-1.17), [<200]
+      const cleanLine = rawLine
+        .replace(/\([\d\.\s\-\<\>\:\,]+\)/g, ' ')
+        .replace(/\[[\d\.\s\-\<\>\:\,]+\]/g, ' ');
+
+      // Find numbers that come after the alias
+      // Matches numbers like 126, 8.27, 0.71, 119
+      const numberMatches = cleanLine.match(/[:\s=]+(\d+(?:\.\d+)?)/g);
+      if (numberMatches) {
+        for (const m of numberMatches) {
+          const valStr = m.replace(/[:\s=]/g, '').trim();
+          const val = parseFloat(valStr);
+          if (!isNaN(val) && val > 0) {
+            return val;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Global text fallback search
+  for (const alias of aliases) {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const cleanText = text.replace(/\([\d\.\s\-\<\>\:\,]+\)/g, ' ');
+    const reg = new RegExp(`${escaped}[^\\d\\n\\r]{0,25}?[:\\s=]+(\\d+(?:\\.\\d+)?)`, 'i');
+    const m = cleanText.match(reg);
+    if (m && m[1]) {
+      const val = parseFloat(m[1]);
+      if (!isNaN(val) && val > 0) return val;
+    }
+  }
+
+  return undefined;
+}
+
 export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLabReport {
   const result: ParsedLabReport = {
     labResults: {
@@ -81,97 +132,75 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
     result.hospital = "โรงพยาบาลจุฬาลงกรณ์";
   } else if (/กรุงเทพ|Bangkok/i.test(text)) {
     result.hospital = "โรงพยาบาลกรุงเทพ";
+  } else if (/บำรุงราษฎร์|Bumrungrad/i.test(text)) {
+    result.hospital = "โรงพยาบาลบำรุงราษฎร์";
+  } else if (/พญาไท|Phyathai/i.test(text)) {
+    result.hospital = "โรงพยาบาลพญาไท";
+  } else if (/สมิติเวช|Samitivej/i.test(text)) {
+    result.hospital = "โรงพยาบาลสมิติเวช";
+  } else if (/พระราม|Praram/i.test(text)) {
+    result.hospital = "โรงพยาบาลพระรามเก้า";
+  } else {
+    const hMatch = text.match(/(?:โรงพยาบาล|คลินิก|Hospital|Clinic)\s*([ก-๙a-zA-Z\s]+)/i);
+    if (hMatch) result.hospital = hMatch[0].trim();
   }
 
   // 2. Patient Name
-  const nameMatch = text.match(/(?:นาย|นาง|นางสาว|เด็กชาย|เด็กหญิง|Mr\.|Mrs\.|Ms\.)\s*([ก-๙a-zA-Z\s\.\'\-]+?)(?=\s{2,}|\d|Age|HN|Loc|202|201|$)/i);
+  const nameMatch = text.match(/(?:นาย|นาง|นางสาว|เด็กชาย|เด็กหญิง|Mr\.|Mrs\.|Ms\.|Name\s*:?)\s*([ก-๙a-zA-Z\s\.\'\-\/]+?)(?=\s{2,}|\n|\r|\d{2,}|Age|HN|Loc|202|201|$)/i);
   if (nameMatch && nameMatch[0]) {
-    result.patientName = nameMatch[0].trim();
+    const rawName = nameMatch[0].trim();
+    if (rawName.length >= 3 && rawName.length <= 60) {
+      result.patientName = rawName;
+    }
   }
 
   // 3. Date
-  const dateMatch = text.match(/(\d{1,2})[-/](\d{1,2})[-/](20\d{2})/);
+  const dateMatch = text.match(/(\d{1,2})[-/](\d{1,2})[-/](20\d{2})/) ||
+                    text.match(/(20\d{2})[-/](\d{1,2})[-/](\d{1,2})/);
   if (dateMatch) {
-    const day = dateMatch[1].padStart(2, "0");
-    const month = dateMatch[2].padStart(2, "0");
-    const year = dateMatch[3];
-    result.date = `${year}-${month}-${day}`;
+    if (dateMatch[1].length === 4) {
+      result.date = `${dateMatch[1]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[3].padStart(2, "0")}`;
+    } else {
+      result.date = `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`;
+    }
   }
 
   const lr: NonNullable<ParsedLabReport["labResults"]> = { customItems: [] };
 
-  // Helper regex matcher for lab test numbers
-  const extractNum = (pattern: RegExp): number | undefined => {
-    const m = text.match(pattern);
-    if (m && m[1]) {
-      const num = parseFloat(m[1]);
-      return isNaN(num) ? undefined : num;
-    }
-    return undefined;
-  };
-
-  // HbA1c
-  lr.hba1c = extractNum(/HbA1c[^\d\.\n]*([\d\.]+)/i);
-
-  // Fasting Blood Sugar / Glucose
-  lr.fbs = extractNum(/(?:Glucose|Fasting Sugar|FBS|Blood Sugar)[^\d\.\n]*([\d\.]+)/i);
-
-  // Cholesterol
-  lr.cholesterol = extractNum(/(?:Total\s*)?Cholesterol[^\d\.\n]*([\d\.]+)/i);
-
-  // Triglyceride
-  lr.triglyceride = extractNum(/Triglyceride[^\d\.\n]*([\d\.]+)/i);
-
-  // HDL
-  lr.hdl = extractNum(/HDL[^\d\.\n]*([\d\.]+)/i);
-
-  // LDL
-  lr.ldl = extractNum(/LDL[^\d\.\n]*([\d\.]+)/i);
-
-  // Creatinine
-  lr.creatinine = extractNum(/(?:Creatinine|Cr)[^\d\.\n]*([\d\.]+)/i);
-
-  // eGFR
-  lr.egfr = extractNum(/eGFR[^\d\.\n]*([\d\.]+)/i);
-
-  // BUN
-  lr.bun = extractNum(/\bBUN\b[^\d\.\n]*([\d\.]+)/i);
-
-  // SGOT / AST
-  lr.sgot = extractNum(/(?:SGOT|AST)[^\d\.\n]*([\d\.]+)/i);
-
-  // SGPT / ALT
-  lr.sgpt = extractNum(/(?:SGPT|ALT)[^\d\.\n]*([\d\.]+)/i);
-
-  // Uric Acid
-  lr.uricAcid = extractNum(/Uric Acid[^\d\.\n]*([\d\.]+)/i);
-
-  // Hemoglobin
-  lr.hemoglobin = extractNum(/(?:Hemoglobin|Hb)[^\d\.\n]*([\d\.]+)/i);
-
-  // WBC
-  lr.wbc = extractNum(/(?:WBC|White Blood Cell)[^\d\.\n]*([\d\.]+)/i);
-
-  // Platelet
-  lr.platelet = extractNum(/(?:Platelet|PLT)[^\d\.\n]*([\d\.]+)/i);
+  // Extraction rules for standard blood lab items
+  lr.hba1c = findLabValueInText(text, ["HbA1c", "Hemoglobin A1c", "A1C", "Glycated Hemoglobin"]);
+  lr.fbs = findLabValueInText(text, ["Fasting Blood Sugar", "Fasting Glucose", "Glucose", "FBS", "Blood Sugar"]);
+  lr.cholesterol = findLabValueInText(text, ["Total Cholesterol", "Cholesterol", "CHOL"]);
+  lr.triglyceride = findLabValueInText(text, ["Triglyceride", "Triglycerides", "TRIG"]);
+  lr.hdl = findLabValueInText(text, ["HDL-Cholesterol", "HDL-C", "HDL"]);
+  lr.ldl = findLabValueInText(text, ["LDL-Cholesterol", "LDL-C", "LDL"]);
+  lr.creatinine = findLabValueInText(text, ["Creatinine", "Cr", "Blood Creatinine"]);
+  lr.egfr = findLabValueInText(text, ["eGFR", "e-GFR", "GFR", "Estimated GFR"]);
+  lr.bun = findLabValueInText(text, ["BUN", "Blood Urea Nitrogen"]);
+  lr.sgot = findLabValueInText(text, ["SGOT", "AST"]);
+  lr.sgpt = findLabValueInText(text, ["SGPT", "ALT"]);
+  lr.uricAcid = findLabValueInText(text, ["Uric Acid", "Uric"]);
+  lr.hemoglobin = findLabValueInText(text, ["Hemoglobin", "Hb", "HGB"]);
+  lr.wbc = findLabValueInText(text, ["WBC", "White Blood Cell", "White Blood Cells"]);
+  lr.platelet = findLabValueInText(text, ["Platelet", "Platelets", "PLT"]);
 
   // Custom Items
   const customTests = [
-    { name: "Estimated Average Glucose", unit: "mg/dL", regex: /Estimated Average Glucose[^\d\.\n]*([\d\.]+)/i },
-    { name: "Sodium (โซเดียม)", unit: "mmol/L", regex: /Sodium[^\d\.\n]*([\d\.]+)/i },
-    { name: "Potassium (โพแทสเซียม)", unit: "mmol/L", regex: /Potassium[^\d\.\n]*([\d\.]+)/i },
-    { name: "Chloride (คลอไรด์)", unit: "mmol/L", regex: /Chloride[^\d\.\n]*([\d\.]+)/i },
-    { name: "Carbondioxide (คาร์บอนไดออกไซด์)", unit: "mmol/L", regex: /Carbondioxide[^\d\.\n]*([\d\.]+)/i },
-    { name: "Albumin/Creatinine Ratio (Urine)", unit: "mg/g", regex: /Albumin\/Creatinine Ratio[^\d\.\n]*([\d\.]+)/i },
-    { name: "Albumin Urine", unit: "mg/dL", regex: /Albumin Urine[^\d\.\n]*([\d\.]+)/i },
+    { name: "Estimated Average Glucose", unit: "mg/dL", aliases: ["Estimated Average Glucose", "eAG"] },
+    { name: "Sodium (โซเดียม)", unit: "mmol/L", aliases: ["Sodium", "Na"] },
+    { name: "Potassium (โพแทสเซียม)", unit: "mmol/L", aliases: ["Potassium", "K"] },
+    { name: "Chloride (คลอไรด์)", unit: "mmol/L", aliases: ["Chloride", "Cl"] },
+    { name: "Carbondioxide (คาร์บอนไดออกไซด์)", unit: "mmol/L", aliases: ["Carbondioxide", "CO2", "Bicarbonate"] },
+    { name: "Albumin/Creatinine Ratio (Urine)", unit: "mg/g", aliases: ["Albumin/Creatinine Ratio", "Urine Alb/Cr"] },
+    { name: "Albumin Urine", unit: "mg/dL", aliases: ["Albumin Urine", "Urine Albumin"] },
   ];
 
   for (const t of customTests) {
-    const m = text.match(t.regex);
-    if (m && m[1]) {
+    const val = findLabValueInText(text, t.aliases);
+    if (val !== undefined) {
       lr.customItems?.push({
         testName: t.name,
-        resultValue: m[1],
+        resultValue: String(val),
         unit: t.unit,
         flag: "normal",
       });
