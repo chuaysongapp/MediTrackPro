@@ -144,6 +144,121 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
     }
   });
 
+  // API: AI Parse Lab Report PDF & Medical Records
+  app.post("/api/ai/parse-lab-report", async (req, res) => {
+    try {
+      const { fileData, fileType, fileName, textContent } = req.body;
+
+      const systemInstruction = `คุณคือระบบปัญญาประดิษฐ์ทางการแพทย์ที่ชำนาญการอ่านเอกสารผลตรวจเลือด (Lab Report), ผลตรวจสุขภาพประจำปี และใบบันทึกการรักษา
+หน้าที่ของคุณคืออ่านข้อมูลจากเอกสาร PDF หรือรูปถ่ายผลแล็บ และสกัดค่าทางการแพทย์ออกมาให้ถูกต้องตรงตามเอกสาร 100%
+
+กฎการสกัดข้อมูล:
+1. ดึงชื่อโรงพยาบาล/คลินิก, วันที่ตรวจ (รูปแบบ YYYY-MM-DD), ชื่อคนไข้, คำวินิจฉัยแพทย์, คำแนะนำแพทย์
+2. ดึงค่าตัวเลขทางการแพทย์อย่างแม่นยำ:
+   - fbs: Fasting Blood Sugar (mg/dL)
+   - hba1c: Glycated Hemoglobin (%)
+   - cholesterol: Total Cholesterol (mg/dL)
+   - triglyceride: Triglycerides (mg/dL)
+   - hdl: High Density Lipoprotein (mg/dL)
+   - ldl: Low Density Lipoprotein (mg/dL)
+   - creatinine: Blood Creatinine (mg/dL)
+   - bun: Blood Urea Nitrogen (mg/dL)
+   - egfr: estimated GFR (mL/min/1.73m2)
+   - sgot: AST (U/L)
+   - sgpt: ALT (U/L)
+   - uricAcid: Uric Acid (mg/dL)
+   - hemoglobin: Hb (g/dL)
+   - wbc: White Blood Cells (x10^3/uL)
+   - platelet: Platelet Count (x10^3/uL)
+3. สำหรับรายการตรวจวัดอื่นๆ ที่มีในเอกสาร ให้ใส่ในอาร์เรย์ customItems โดยระบุ testName, resultValue, unit, refRange, flag ("normal"|"high"|"low"|"abnormal")
+4. ตอบกลับเฉพาะโครงสร้าง JSON ที่ถูกต้องสมบูรณ์ ห้ามมีข้อความอื่นนอกเหนือจาก JSON`;
+
+      const promptText = `กรุณาอ่านเอกสารผลตรวจแล็บ/ผลตรวจเลือดนี้ และสกัดข้อมูลออกมาเป็น JSON ในรูปแบบนี้:
+{
+  "hospital": "ชื่อโรงพยาบาลหรือคลินิก",
+  "date": "YYYY-MM-DD",
+  "patientName": "ชื่อผู้ป่วย",
+  "title": "หัวข้อเอกสาร เช่น ผลตรวจเลือดประจำปี 2026",
+  "diagnosis": "คำวินิจฉัยสรุป",
+  "doctorNotes": "คำแนะนำแพทย์",
+  "labResults": {
+    "fbs": 105,
+    "hba1c": 6.2,
+    "cholesterol": 198,
+    "triglyceride": 140,
+    "hdl": 52,
+    "ldl": 118,
+    "creatinine": 0.9,
+    "bun": 12,
+    "egfr": 95,
+    "sgot": 24,
+    "sgpt": 28,
+    "uricAcid": 5.4,
+    "hemoglobin": 14.2,
+    "wbc": 6.5,
+    "platelet": 250,
+    "customItems": [
+      { "testName": "Microalbumin/Cr Ratio", "resultValue": "15.2", "unit": "mg/g", "refRange": "<30", "flag": "normal" }
+    ]
+  }
+}
+ชื่อไฟล์: ${fileName || "document.pdf"}`;
+
+      let contents: any[] = [];
+      if (fileData && fileData.includes("base64,")) {
+        const base64Clean = fileData.split("base64,")[1];
+        const mime = fileType || (fileData.includes("data:application/pdf") ? "application/pdf" : "image/jpeg");
+        contents = [
+          {
+            inlineData: {
+              mimeType: mime,
+              data: base64Clean,
+            },
+          },
+          { text: promptText },
+        ];
+      } else if (textContent) {
+        contents = [{ text: `${promptText}\n\nข้อความสกัดจากเอกสาร:\n${textContent}` }];
+      } else {
+        return res.status(400).json({ success: false, error: "กรุณาส่งไฟล์ PDF หรือข้อความในเอกสาร" });
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.1,
+        },
+      });
+
+      const rawText = response.text || "";
+      const cleanJson = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+      let parsedData: any = {};
+      try {
+        parsedData = JSON.parse(cleanJson);
+      } catch (e) {
+        parsedData = {
+          title: `ผลตรวจจากไฟล์ ${fileName || "PDF"}`,
+          hospital: "โรงพยาบาล/คลินิกในเอกสาร",
+          date: new Date().toISOString().split("T")[0],
+          doctorNotes: rawText,
+        };
+      }
+
+      return res.json({
+        success: true,
+        data: parsedData,
+      });
+    } catch (err: any) {
+      console.error("Parse Lab Report Error:", err);
+      return res.status(500).json({
+        success: false,
+        error: "เกิดข้อผิดพลาดในการวิเคราะห์เอกสาร PDF: " + (err.message || "Unknown error"),
+      });
+    }
+  });
+
   // API: Cloud Data Backup & Restore
   app.post("/api/backup/save", (req, res) => {
     try {

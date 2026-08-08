@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { User, onAuthStateChanged } from "firebase/auth";
-import { SystemData, UserProfile, Medicine, MealTime, FoodRelation, HealthVital, DoctorAppointment, LineConfig } from "./types";
+import { SystemData, UserProfile, Medicine, MealTime, FoodRelation, HealthVital, DoctorAppointment, LineConfig, MedicalRecord } from "./types";
 import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData } from "./utils/storage";
 import {
   auth,
@@ -27,6 +27,7 @@ import { AddAppointmentModal } from "./components/AddAppointmentModal";
 import { AddProfileModal } from "./components/AddProfileModal";
 import { DoctorReportModal } from "./components/DoctorReportModal";
 import { PwaInstallModal } from "./components/PwaInstallModal";
+import { AddMedicalRecordModal } from "./components/AddMedicalRecordModal";
 
 export default function App() {
   const [data, setData] = useState<SystemData>(() => loadInitialData());
@@ -163,6 +164,26 @@ export default function App() {
   const [editingProfile, setEditingProfile] = useState<UserProfile | null>(null);
   const [showDoctorReportModal, setShowDoctorReportModal] = useState<boolean>(false);
   const [showPwaModal, setShowPwaModal] = useState<boolean>(false);
+  const [showAddMedicalRecordModal, setShowAddMedicalRecordModal] = useState<boolean>(false);
+
+  const handleSaveMedicalRecord = (record: Omit<MedicalRecord, "id">) => {
+    const newRecord: MedicalRecord = {
+      ...record,
+      id: "rec_" + Date.now(),
+    };
+    setData((prev) => ({
+      ...prev,
+      medicalRecords: [newRecord, ...prev.medicalRecords],
+    }));
+    setShowAddMedicalRecordModal(false);
+  };
+
+  const handleDeleteMedicalRecord = (recordId: string) => {
+    setData((prev) => ({
+      ...prev,
+      medicalRecords: prev.medicalRecords.filter((r) => r.id !== recordId),
+    }));
+  };
 
   // Sync to local storage on data change
   useEffect(() => {
@@ -598,6 +619,8 @@ export default function App() {
             appointments={data.appointments}
             medicalRecords={data.medicalRecords}
             onOpenAddAppointment={() => setShowAddApptModal(true)}
+            onOpenAddMedicalRecord={() => setShowAddMedicalRecordModal(true)}
+            onDeleteMedicalRecord={handleDeleteMedicalRecord}
             onToggleApptStatus={handleToggleApptStatus}
           />
         )}
@@ -702,6 +725,16 @@ export default function App() {
       {/* PWA App Install Modal */}
       {showPwaModal && (
         <PwaInstallModal onClose={() => setShowPwaModal(false)} />
+      )}
+
+      {/* Add Medical Record / Upload PDF Modal */}
+      {showAddMedicalRecordModal && (
+        <AddMedicalRecordModal
+          profileId={activeProfile.id}
+          profileName={activeProfile.name}
+          onClose={() => setShowAddMedicalRecordModal(false)}
+          onSave={handleSaveMedicalRecord}
+        />
       )}
 
       {/* High Density Footer */}

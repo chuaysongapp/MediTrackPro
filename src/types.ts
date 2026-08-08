@@ -75,22 +75,42 @@ export interface DoctorAppointment {
   status: "upcoming" | "completed" | "cancelled";
 }
 
+export interface CustomLabItem {
+  testName: string;
+  resultValue: string;
+  unit?: string;
+  refRange?: string;
+  flag?: "normal" | "high" | "low" | "abnormal";
+}
+
 export interface MedicalRecord {
   id: string;
   profileId: string;
   date: string; // YYYY-MM-DD
   title: string; // เช่น ผลตรวจเลือดประจำปี
   hospital: string;
+  patientName?: string;
   diagnosis?: string; // คำวินิจฉัย
   doctorNotes?: string; // บันทึกของแพทย์
+  pdfFileName?: string;
+  isAiParsed?: boolean;
   labResults?: {
-    fbs?: number; // Fasting Blood Sugar
+    fbs?: number; // Fasting Blood Sugar (mg/dL)
     hba1c?: number; // %
     cholesterol?: number; // mg/dL
-    triglyceride?: number;
-    hdl?: number;
-    ldl?: number;
-    creatinine?: number;
+    triglyceride?: number; // mg/dL
+    hdl?: number; // mg/dL
+    ldl?: number; // mg/dL
+    creatinine?: number; // mg/dL
+    bun?: number; // mg/dL
+    egfr?: number; // mL/min/1.73m2
+    sgot?: number; // AST (U/L)
+    sgpt?: number; // ALT (U/L)
+    uricAcid?: number; // mg/dL
+    hemoglobin?: number; // g/dL
+    wbc?: number; // x10^3/uL
+    platelet?: number; // x10^3/uL
+    customItems?: CustomLabItem[];
   };
   attachments?: string[];
 }
