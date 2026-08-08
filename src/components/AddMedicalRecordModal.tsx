@@ -255,7 +255,32 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
       setUploadError("");
 
       if (!serverParsedSuccess) {
-        setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
+        let localCount = 0;
+        if (localParsed && localParsed.labResults) {
+          const lr = localParsed.labResults;
+          if (lr.fbs !== undefined) localCount++;
+          if (lr.hba1c !== undefined) localCount++;
+          if (lr.cholesterol !== undefined) localCount++;
+          if (lr.triglyceride !== undefined) localCount++;
+          if (lr.hdl !== undefined) localCount++;
+          if (lr.ldl !== undefined) localCount++;
+          if (lr.creatinine !== undefined) localCount++;
+          if (lr.egfr !== undefined) localCount++;
+          if (lr.bun !== undefined) localCount++;
+          if (lr.sgot !== undefined) localCount++;
+          if (lr.sgpt !== undefined) localCount++;
+          if (lr.uricAcid !== undefined) localCount++;
+          if (lr.hemoglobin !== undefined) localCount++;
+          if (lr.wbc !== undefined) localCount++;
+          if (lr.platelet !== undefined) localCount++;
+          if (lr.customItems) localCount += lr.customItems.length;
+        }
+
+        if (localCount > 0 || (localParsed && (localParsed.hospital || localParsed.patientName))) {
+          setUploadSuccess(`ถอดรหัสและดึงข้อมูลจากไฟล์ "${file.name}" สำเร็จ (${localCount > 0 ? `${localCount} รายการผลแล็บ` : 'ข้อมูลเบื้องต้น'})! กรุณาตรวจสอบข้อมูลและปรับแก้ไขในแบบฟอร์มด้านล่างได้ทันที`);
+        } else {
+          setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
+        }
       }
     } catch (err: any) {
       setIsAiParsed(true);

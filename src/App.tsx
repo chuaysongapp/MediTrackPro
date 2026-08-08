@@ -98,12 +98,13 @@ export default function App() {
     } catch (err: any) {
       const errStr = String(err?.code || '') + ' ' + String(err?.message || '') + ' ' + String(err);
       if (errStr.includes('unauthorized-domain')) {
+        const currentDomain = window.location.hostname;
         const confirmGuest = window.confirm(
-          "โดเมน 'chuaysongapp.github.io' ยังไม่ถูกเพิ่มใน Authorized Domains ของ Firebase โปรเจกต์ meditrackpro-370f2\n\n" +
-          "💡 วิธีแก้ไข:\n" +
-          "1. เข้าไปที่ Firebase Console (Authentication > Settings > Authorized domains)\n" +
-          "2. กด Add Domain แล้วเพิ่ม 'chuaysongapp.github.io'\n\n" +
-          "ต้องการเข้าสู่ระบบด้วย 'โหมด Guest (Anonymous)' ชั่วคราวก่อนหรือไม่?"
+          `โดเมนปัจจุบัน '${currentDomain}' ยังไม่ได้ถูกเพิ่มใน Authorized Domains ของ Firebase Console (โปรเจกต์ meditrackpro-370f2)\n\n` +
+          "💡 วิธีเปิดใช้งาน Google Login:\n" +
+          `1. เข้าไปที่ Firebase Console > Authentication > Settings > Authorized domains\n` +
+          `2. คลิก 'Add domain' แล้วใส่ '${currentDomain}'\n\n` +
+          "ต้องการเข้าใช้งานด้วย 'บัญชีผู้เยี่ยมชม (Guest)' เพื่อให้ระบบสามารถบันทึกข้อมูลคลาวด์และใช้งานต่อได้ทันทีหรือไม่?"
         );
         if (confirmGuest) {
           handleLoginGuest();
