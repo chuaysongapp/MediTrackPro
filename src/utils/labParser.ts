@@ -1,12 +1,19 @@
 import * as pdfjsLib from "pdfjs-dist";
 
-// Worker URL for Vite / Browser
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Configure worker URL for browser environments
+if (typeof window !== "undefined" && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version || "3.11.174"}/build/pdf.worker.min.js`;
+}
 
 export async function extractTextFromPdfFile(file: File): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+    });
+    
+    const pdf = await loadingTask.promise;
     let fullText = "";
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
@@ -66,18 +73,18 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
   if (!text) return result;
 
   // 1. Hospital Name
-  if (text.includes("รามาธิบดี") || text.includes("RAMA")) {
+  if (/รามาธิบดี|RAMA/i.test(text)) {
     result.hospital = "คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี";
-  } else if (text.includes("ศิริราช") || text.includes("Siriraj")) {
+  } else if (/ศิริราช|Siriraj/i.test(text)) {
     result.hospital = "โรงพยาบาลศิริราช";
-  } else if (text.includes("จุฬา") || text.includes("Chulalongkorn")) {
+  } else if (/จุฬา|Chulalongkorn/i.test(text)) {
     result.hospital = "โรงพยาบาลจุฬาลงกรณ์";
-  } else if (text.includes("กรุงเทพ") || text.includes("Bangkok")) {
+  } else if (/กรุงเทพ|Bangkok/i.test(text)) {
     result.hospital = "โรงพยาบาลกรุงเทพ";
   }
 
   // 2. Patient Name
-  const nameMatch = text.match(/(?:นาย|นาง|นางสาว|เด็กชาย|เด็กหญิง|Mr\.|Mrs\.|Ms\.)\s*([ก-๙a-zA-Z\s]+?)(?=\s{2,}|\d|Age|HN|Loc|202|201|$)/i);
+  const nameMatch = text.match(/(?:นาย|นาง|นางสาว|เด็กชาย|เด็กหญิง|Mr\.|Mrs\.|Ms\.)\s*([ก-๙a-zA-Z\s\.\'\-]+?)(?=\s{2,}|\d|Age|HN|Loc|202|201|$)/i);
   if (nameMatch && nameMatch[0]) {
     result.patientName = nameMatch[0].trim();
   }
@@ -93,63 +100,70 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
 
   const lr: NonNullable<ParsedLabReport["labResults"]> = { customItems: [] };
 
-  // HbA1c
-  const hba1cMatch = text.match(/HbA1c[^\d]*(\d+\.?\d*)/i);
-  if (hba1cMatch) lr.hba1c = parseFloat(hba1cMatch[1]);
+  // Helper regex matcher for lab test numbers
+  const extractNum = (pattern: RegExp): number | undefined => {
+    const m = text.match(pattern);
+    if (m && m[1]) {
+      const num = parseFloat(m[1]);
+      return isNaN(num) ? undefined : num;
+    }
+    return undefined;
+  };
 
-  // Glucose
-  const glucoseMatch = text.match(/(?:Glucose|Fasting Sugar|FBS)[^\d]*(\d+\.?\d*)/i);
-  if (glucoseMatch) lr.fbs = parseFloat(glucoseMatch[1]);
+  // HbA1c
+  lr.hba1c = extractNum(/HbA1c[^\d\.\n]*([\d\.]+)/i);
+
+  // Fasting Blood Sugar / Glucose
+  lr.fbs = extractNum(/(?:Glucose|Fasting Sugar|FBS|Blood Sugar)[^\d\.\n]*([\d\.]+)/i);
 
   // Cholesterol
-  const cholMatch = text.match(/(?:Total\s*)?Cholesterol[^\d]*(\d+\.?\d*)/i);
-  if (cholMatch) lr.cholesterol = parseFloat(cholMatch[1]);
+  lr.cholesterol = extractNum(/(?:Total\s*)?Cholesterol[^\d\.\n]*([\d\.]+)/i);
 
   // Triglyceride
-  const triMatch = text.match(/Triglyceride[^\d]*(\d+\.?\d*)/i);
-  if (triMatch) lr.triglyceride = parseFloat(triMatch[1]);
+  lr.triglyceride = extractNum(/Triglyceride[^\d\.\n]*([\d\.]+)/i);
 
   // HDL
-  const hdlMatch = text.match(/HDL[^\d]*(\d+\.?\d*)/i);
-  if (hdlMatch) lr.hdl = parseFloat(hdlMatch[1]);
+  lr.hdl = extractNum(/HDL[^\d\.\n]*([\d\.]+)/i);
 
   // LDL
-  const ldlMatch = text.match(/LDL[^\d]*(\d+\.?\d*)/i);
-  if (ldlMatch) lr.ldl = parseFloat(ldlMatch[1]);
+  lr.ldl = extractNum(/LDL[^\d\.\n]*([\d\.]+)/i);
 
   // Creatinine
-  const crMatch = text.match(/Creatinine[^\d]*(\d+\.?\d*)/i);
-  if (crMatch) lr.creatinine = parseFloat(crMatch[1]);
+  lr.creatinine = extractNum(/(?:Creatinine|Cr)[^\d\.\n]*([\d\.]+)/i);
 
   // eGFR
-  const egfrMatch = text.match(/eGFR[^\d]*(\d+\.?\d*)/i);
-  if (egfrMatch) lr.egfr = parseFloat(egfrMatch[1]);
+  lr.egfr = extractNum(/eGFR[^\d\.\n]*([\d\.]+)/i);
 
   // BUN
-  const bunMatch = text.match(/\bBUN\b[^\d]*(\d+\.?\d*)/i);
-  if (bunMatch) lr.bun = parseFloat(bunMatch[1]);
+  lr.bun = extractNum(/\bBUN\b[^\d\.\n]*([\d\.]+)/i);
 
-  // SGOT
-  const sgotMatch = text.match(/(?:SGOT|AST)[^\d]*(\d+\.?\d*)/i);
-  if (sgotMatch) lr.sgot = parseFloat(sgotMatch[1]);
+  // SGOT / AST
+  lr.sgot = extractNum(/(?:SGOT|AST)[^\d\.\n]*([\d\.]+)/i);
 
-  // SGPT
-  const sgptMatch = text.match(/(?:SGPT|ALT)[^\d]*(\d+\.?\d*)/i);
-  if (sgptMatch) lr.sgpt = parseFloat(sgptMatch[1]);
+  // SGPT / ALT
+  lr.sgpt = extractNum(/(?:SGPT|ALT)[^\d\.\n]*([\d\.]+)/i);
 
   // Uric Acid
-  const uricMatch = text.match(/Uric Acid[^\d]*(\d+\.?\d*)/i);
-  if (uricMatch) lr.uricAcid = parseFloat(uricMatch[1]);
+  lr.uricAcid = extractNum(/Uric Acid[^\d\.\n]*([\d\.]+)/i);
+
+  // Hemoglobin
+  lr.hemoglobin = extractNum(/(?:Hemoglobin|Hb)[^\d\.\n]*([\d\.]+)/i);
+
+  // WBC
+  lr.wbc = extractNum(/(?:WBC|White Blood Cell)[^\d\.\n]*([\d\.]+)/i);
+
+  // Platelet
+  lr.platelet = extractNum(/(?:Platelet|PLT)[^\d\.\n]*([\d\.]+)/i);
 
   // Custom Items
   const customTests = [
-    { name: "Estimated Average Glucose", unit: "mg/dL", regex: /Estimated Average Glucose[^\d]*(\d+\.?\d*)/i },
-    { name: "Sodium (โซเดียม)", unit: "mmol/L", regex: /Sodium[^\d]*(\d+\.?\d*)/i },
-    { name: "Potassium (โพแทสเซียม)", unit: "mmol/L", regex: /Potassium[^\d]*(\d+\.?\d*)/i },
-    { name: "Chloride (คลอไรด์)", unit: "mmol/L", regex: /Chloride[^\d]*(\d+\.?\d*)/i },
-    { name: "Carbondioxide (คาร์บอนไดออกไซด์)", unit: "mmol/L", regex: /Carbondioxide[^\d]*(\d+\.?\d*)/i },
-    { name: "Albumin/Creatinine Ratio (Urine)", unit: "mg/g", regex: /Albumin\/Creatinine Ratio[^\d]*(\d+\.?\d*)/i },
-    { name: "Albumin Urine", unit: "mg/dL", regex: /Albumin Urine[^\d]*(\d+\.?\d*)/i },
+    { name: "Estimated Average Glucose", unit: "mg/dL", regex: /Estimated Average Glucose[^\d\.\n]*([\d\.]+)/i },
+    { name: "Sodium (โซเดียม)", unit: "mmol/L", regex: /Sodium[^\d\.\n]*([\d\.]+)/i },
+    { name: "Potassium (โพแทสเซียม)", unit: "mmol/L", regex: /Potassium[^\d\.\n]*([\d\.]+)/i },
+    { name: "Chloride (คลอไรด์)", unit: "mmol/L", regex: /Chloride[^\d\.\n]*([\d\.]+)/i },
+    { name: "Carbondioxide (คาร์บอนไดออกไซด์)", unit: "mmol/L", regex: /Carbondioxide[^\d\.\n]*([\d\.]+)/i },
+    { name: "Albumin/Creatinine Ratio (Urine)", unit: "mg/g", regex: /Albumin\/Creatinine Ratio[^\d\.\n]*([\d\.]+)/i },
+    { name: "Albumin Urine", unit: "mg/dL", regex: /Albumin Urine[^\d\.\n]*([\d\.]+)/i },
   ];
 
   for (const t of customTests) {

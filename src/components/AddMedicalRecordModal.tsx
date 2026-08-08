@@ -88,36 +88,6 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     });
   };
 
-  // Demo RAMA Report Loader
-  const handleLoadRamaDemo = () => {
-    setPdfFileName("RAMA_Lab_Report_5736888.pdf");
-    setTitle("รายงานผลตรวจเลือดและเคมีคลินิก - คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี");
-    setHospital("คณะแพทยศาสตร์โรงพยาบาลรามาธิบดี");
-    setPatientName("นาย ณรงค์ ช่วยสงค์");
-    setDate("2025-10-29");
-    setFbs("126");
-    setHba1c("8.27");
-    setCholesterol("128");
-    setTriglyceride("91");
-    setHdl("36");
-    setLdl("81");
-    setCreatinine("0.71");
-    setEgfr("119");
-    setDiagnosis("ระดับ HbA1c 8.27% และ Glucose 126 mg/dL (สูงกว่าเกณฑ์) / ไขมัน HDL 36 mg/dL (ต่ำกว่าเกณฑ์) / การทำงานของไต eGFR 119 อยู่ในเกณฑ์ดีมาก");
-    setDoctorNotes("แนะนำให้ควบคุมปริมาณคาร์โบไฮเดรตและน้ำตาล เพิ่มการออกกำลังกาย และติดตามระดับน้ำตาลสะสมกับแพทย์");
-    setCustomItems([
-      { testName: "Estimated Average Glucose", resultValue: "191", unit: "mg/dL", refRange: "", flag: "high" },
-      { testName: "Sodium (โซเดียม)", resultValue: "141", unit: "mmol/L", refRange: "136 - 145", flag: "normal" },
-      { testName: "Potassium (โพแทสเซียม)", resultValue: "4.34", unit: "mmol/L", refRange: "3.50 - 5.10", flag: "normal" },
-      { testName: "Chloride (คลอไรด์)", resultValue: "106", unit: "mmol/L", refRange: "98 - 107", flag: "normal" },
-      { testName: "Carbondioxide (คาร์บอนไดออกไซด์)", resultValue: "23.1", unit: "mmol/L", refRange: "22.0 - 29.0", flag: "normal" },
-      { testName: "Albumin/Creatinine Ratio (Urine)", resultValue: "12.367", unit: "mg/g", refRange: "< 30", flag: "normal" },
-      { testName: "Albumin Urine", resultValue: "2.040", unit: "mg/dL", refRange: "< 2.90", flag: "normal" },
-    ]);
-    setIsAiParsed(true);
-    setUploadSuccess("โหลดข้อมูลตัวอย่างจากไฟล์แล็บโรงพยาบาลรามาธิบดี (นาย ณรงค์ ช่วยสงค์) เรียบร้อยแล้ว! สามารถตรวจสอบและกดบันทึกได้ทันที");
-  };
-
   // Handle PDF / File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -374,16 +344,6 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                   className="hidden"
                 />
               </label>
-
-              <button
-                type="button"
-                onClick={handleLoadRamaDemo}
-                disabled={isUploading}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white hover:bg-emerald-100 text-emerald-800 font-extrabold text-xs rounded-xl border border-emerald-300 shadow-2xs transition-all cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-600" />
-                <span>⚡ โหลดผลตรวจเลือดตัวอย่างโรงพยาบาลรามาธิบดี (HN: 5736888)</span>
-              </button>
             </div>
 
             {uploadSuccess && (
