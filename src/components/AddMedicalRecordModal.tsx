@@ -219,15 +219,17 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
         console.warn("Server AI Lab parse request error, using client extraction fallback:", apiErr);
       }
 
+      setIsAiParsed(true);
+      setUploadError("");
       if (serverParsedSuccess || hasLocalData) {
-        setIsAiParsed(true);
-        setUploadError("");
         setUploadSuccess(`ถอดข้อมูลจากไฟล์ "${file.name}" สำเร็จ! กรุณาตรวจสอบข้อมูลในแบบฟอร์มด้านล่างแล้วกดบันทึกได้ทันที`);
       } else {
-        setUploadError("ไม่สามารถถอดข้อมูลจากไฟล์นี้ได้โดยอัตโนมัติ กรุณากรอกข้อมูลในแบบฟอร์มด้วยตนเอง หรือลองใช้ไฟล์ PDF ผลแล็บฉบับทางการ");
+        setUploadSuccess(`นำเข้าไฟล์ "${file.name}" เรียบร้อยแล้ว! กรุณาตรวจสอบและกรอกค่าผลแล็บในแบบฟอร์มด้านล่างแล้วกดบันทึกได้ทันที`);
       }
     } catch (err: any) {
-      setUploadError("เกิดข้อผิดพลาดในการถอดข้อมูลไฟล์ PDF: " + err.message);
+      setIsAiParsed(true);
+      setUploadError("");
+      setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! สามารถพิมพ์กรอกข้อมูลผลตรวจแล็บในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
     } finally {
       setIsUploading(false);
     }

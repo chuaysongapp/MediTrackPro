@@ -233,7 +233,7 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
         finalPrompt += `\n\nข้อความสกัดจากเอกสาร:\n${textContent}`;
       }
 
-      let contents: any[] = [];
+      const parts: any[] = [];
       if (fileData && fileData.includes("base64,")) {
         const base64Clean = fileData.split("base64,")[1];
         let mime = fileType;
@@ -243,23 +243,20 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
           else if (fileData.startsWith("data:image/webp")) mime = "image/webp";
           else mime = "image/jpeg";
         }
-        contents = [
-          {
-            inlineData: {
-              mimeType: mime,
-              data: base64Clean,
-            },
+        parts.push({
+          inlineData: {
+            mimeType: mime,
+            data: base64Clean,
           },
-          { text: finalPrompt },
-        ];
-      } else if (textContent) {
-        contents = [{ text: finalPrompt }];
-      } else {
-        return res.status(400).json({ success: false, error: "กรุณาส่งไฟล์ PDF หรือข้อความในเอกสาร" });
+        });
       }
 
+      parts.push({ text: finalPrompt });
+
+      const contents = [{ role: "user", parts }];
+
       let rawText = "";
-      const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const modelsToTry = ["gemini-3.6-flash", "gemini-flash-latest"];
 
       for (const modelName of modelsToTry) {
         try {
