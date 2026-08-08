@@ -18,15 +18,64 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(" ");
+      
+      let pageText = "";
+      let lastY: number | null = null;
+      for (const item of textContent.items as any[]) {
+        const currentY = item.transform ? item.transform[5] : null;
+        if (lastY !== null && currentY !== null && Math.abs(currentY - lastY) > 5) {
+          pageText += "\n";
+        } else if (pageText.length > 0 && !pageText.endsWith("\n") && !pageText.endsWith(" ")) {
+          pageText += " ";
+        }
+        pageText += item.str || "";
+        if (currentY !== null) lastY = currentY;
+      }
+
       fullText += `--- Page ${pageNum} ---\n` + pageText + "\n\n";
     }
     return fullText.trim();
   } catch (err) {
     console.warn("Client PDF text extraction notice:", err);
     return "";
+  }
+}
+
+export async function renderPdfPagesToImages(file: File, maxPages = 3): Promise<string[]> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+    });
+    
+    const pdf = await loadingTask.promise;
+    const pageImages: string[] = [];
+    const pagesToRender = Math.min(pdf.numPages, maxPages);
+
+    for (let pageNum = 1; pageNum <= pagesToRender; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      
+      if (context) {
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({
+          canvasContext: context,
+          viewport: viewport,
+          canvas: canvas,
+        } as any).promise;
+        
+        const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        pageImages.push(jpegDataUrl);
+      }
+    }
+    return pageImages;
+  } catch (err) {
+    console.warn("PDF page image rendering notice:", err);
+    return [];
   }
 }
 

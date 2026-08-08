@@ -171,13 +171,13 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
   // API: AI Parse Lab Report PDF & Medical Records
   app.post("/api/ai/parse-lab-report", async (req, res) => {
     try {
-      const { fileData, fileType, fileName, textContent } = req.body;
+      const { fileData, pageImages, fileType, fileName, textContent } = req.body;
 
       const systemInstruction = `คุณคือระบบปัญญาประดิษฐ์ทางการแพทย์ที่ชำนาญการอ่านเอกสารผลตรวจเลือด (Lab Report), ผลตรวจสุขภาพประจำปี และใบบันทึกการรักษา
 หน้าที่ของคุณคืออ่านข้อมูลจากเอกสาร PDF หรือรูปถ่ายผลแล็บ และสกัดค่าทางการแพทย์ออกมาให้ถูกต้องตรงตามเอกสาร 100%
 
 กฎการสกัดข้อมูลอย่างเคร่งครัด:
-1. ห้ามสร้างข้อมูลเท็จหรือสุ่มตัวเลขเด็ดขาด! หากในเอกสารไม่มีค่าใด ให้ปล่อยค่าเป็น null หรือละเว้น
+1. ห้ามสร้างข้อมูลเท็จหรือสุ่มตัวเลขเด็ดขาด! หากในเอกสารไม่มีค่าใด ให้ปล่อยค่าเป็น null
 2. ดึงชื่อโรงพยาบาล/คลินิกที่ระบุในเอกสารจริง (ถ้าไม่ระบุให้คืนค่าเป็น "")
 3. ดึงวันที่ตรวจ (รูปแบบ YYYY-MM-DD) และชื่อคนไข้จริงจากเอกสาร (ถ้ามี)
 4. ดึงค่าตัวเลขผลแล็บทางการแพทย์ออกมาตรงตามตัวเลขในเอกสาร:
@@ -234,7 +234,22 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       }
 
       const parts: any[] = [];
-      if (fileData && fileData.includes("base64,")) {
+
+      // 1. If rendered page images are available
+      if (Array.isArray(pageImages) && pageImages.length > 0) {
+        for (const imgDataUrl of pageImages) {
+          if (imgDataUrl && imgDataUrl.includes("base64,")) {
+            parts.push({
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: imgDataUrl.split("base64,")[1],
+              },
+            });
+          }
+        }
+      } 
+      // 2. Fallback to raw fileData if single file/image
+      else if (fileData && fileData.includes("base64,")) {
         const base64Clean = fileData.split("base64,")[1];
         let mime = fileType;
         if (!mime || mime === "application/octet-stream" || mime === "") {
@@ -253,57 +268,44 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
 
       parts.push({ text: finalPrompt });
 
-      // Try different contents payload formats supported by @google/genai SDK
-      const contentsPayloads = [
-        { parts },
-        parts,
-        [{ role: "user", parts }],
-      ];
-
       let rawText = "";
       const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
 
       for (const modelName of modelsToTry) {
-        for (const contentsObj of contentsPayloads) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts },
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+              responseMimeType: "application/json",
+            },
+          });
+          rawText = response.text || "";
+          if (rawText) break;
+        } catch (mErr: any) {
+          console.warn(`Model ${modelName} parse lab warning:`, mErr?.message || mErr);
+        }
+      }
+
+      if (!rawText) {
+        // Fallback with contents array
+        for (const modelName of modelsToTry) {
           try {
             const response = await ai.models.generateContent({
               model: modelName,
-              contents: contentsObj as any,
+              contents: parts,
               config: {
                 systemInstruction,
                 temperature: 0.1,
-                responseMimeType: "application/json",
               },
             });
             rawText = response.text || "";
             if (rawText) break;
-          } catch (mErr) {
-            // continue fallback
+          } catch (mErr: any) {
+            console.warn(`Model ${modelName} fallback parse lab warning:`, mErr?.message || mErr);
           }
-        }
-        if (rawText) break;
-      }
-
-      if (!rawText) {
-        // Fallback without responseMimeType
-        for (const modelName of modelsToTry) {
-          for (const contentsObj of contentsPayloads) {
-            try {
-              const response = await ai.models.generateContent({
-                model: modelName,
-                contents: contentsObj as any,
-                config: {
-                  systemInstruction,
-                  temperature: 0.1,
-                },
-              });
-              rawText = response.text || "";
-              if (rawText) break;
-            } catch (mErr) {
-              // continue fallback
-            }
-          }
-          if (rawText) break;
         }
       }
 
@@ -317,6 +319,7 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       try {
         parsedData = JSON.parse(cleanJson);
       } catch (e) {
+        console.warn("Could not parse JSON from Gemini output:", rawText);
         parsedData = {
           title: `ผลตรวจจากไฟล์ ${fileName || "PDF"}`,
           hospital: "",

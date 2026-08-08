@@ -17,7 +17,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { MedicalRecord, CustomLabItem } from "../types";
-import { extractTextFromPdfFile, parseLabTextWithRegex } from "../utils/labParser";
+import { extractTextFromPdfFile, renderPdfPagesToImages, parseLabTextWithRegex } from "../utils/labParser";
 
 interface AddMedicalRecordModalProps {
   profileId: string;
@@ -120,10 +120,22 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     setDoctorNotes("");
 
     try {
-      // 1. Client-side PDF text extraction
+      // 1. Client-side PDF text & page image extraction
       let extractedText = "";
+      let renderedPageImages: string[] = [];
+
       if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
         extractedText = await extractTextFromPdfFile(file);
+        renderedPageImages = await renderPdfPagesToImages(file, 3);
+      } else if (file.type.startsWith("image/")) {
+        // For uploaded images (PNG, JPG, WEBP), convert to data URL directly
+        const imgDataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string) || "");
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(file);
+        });
+        if (imgDataUrl) renderedPageImages = [imgDataUrl];
       }
 
       // 2. Immediate Local RegEx parsing as instant fallback
@@ -158,7 +170,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
         }
       }
 
-      // 3. Convert to base64 if small enough (< 8MB)
+      // 3. Convert raw file to base64 if small enough (< 8MB)
       let base64Data = "";
       if (file.size < 8 * 1024 * 1024) {
         base64Data = await new Promise<string>((resolve) => {
@@ -182,6 +194,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fileData: base64Data,
+            pageImages: renderedPageImages,
             fileType: detectedMime,
             fileName: file.name,
             textContent: extractedText,
