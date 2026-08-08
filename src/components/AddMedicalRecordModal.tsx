@@ -15,6 +15,9 @@ import {
   FileCheck,
   Save,
   ShieldCheck,
+  ClipboardList,
+  Eye,
+  Search,
 } from "lucide-react";
 import { MedicalRecord, CustomLabItem } from "../types";
 import { extractTextFromPdfFile, renderPdfPagesToImages, parseLabTextWithRegex } from "../utils/labParser";
@@ -33,6 +36,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
   onSave,
 }) => {
   const [activeTab, setActiveTab] = useState<"pdf" | "manual">("pdf");
+  const [pdfMode, setPdfMode] = useState<"file" | "paste">("file");
 
   // Form State
   const [title, setTitle] = useState<string>("ผลตรวจเลือดและเคมีคลินิก");
@@ -43,6 +47,11 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
   const [doctorNotes, setDoctorNotes] = useState<string>("");
   const [pdfFileName, setPdfFileName] = useState<string>("");
   const [isAiParsed, setIsAiParsed] = useState<boolean>(false);
+
+  // Raw Text Inspection & Paste State
+  const [rawTextContent, setRawTextContent] = useState<string>("");
+  const [pastedText, setPastedText] = useState<string>("");
+  const [showRawInspector, setShowRawInspector] = useState<boolean>(false);
 
   // Lab Results State
   const [fbs, setFbs] = useState<string>("");
@@ -88,6 +97,63 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     });
   };
 
+  // Helper to apply parsed values to state
+  const applyParsedDataToForm = (parsed: ReturnType<typeof parseLabTextWithRegex>): number => {
+    if (parsed.hospital) setHospital(parsed.hospital);
+    if (parsed.patientName) setPatientName(parsed.patientName);
+    if (parsed.date) setDate(parsed.date);
+    if (parsed.title) setTitle(parsed.title);
+
+    let extractedCount = 0;
+
+    if (parsed.labResults) {
+      const lr = parsed.labResults;
+      if (lr.fbs !== undefined && lr.fbs !== null) { setFbs(String(lr.fbs)); extractedCount++; }
+      if (lr.hba1c !== undefined && lr.hba1c !== null) { setHba1c(String(lr.hba1c)); extractedCount++; }
+      if (lr.cholesterol !== undefined && lr.cholesterol !== null) { setCholesterol(String(lr.cholesterol)); extractedCount++; }
+      if (lr.triglyceride !== undefined && lr.triglyceride !== null) { setTriglyceride(String(lr.triglyceride)); extractedCount++; }
+      if (lr.hdl !== undefined && lr.hdl !== null) { setHdl(String(lr.hdl)); extractedCount++; }
+      if (lr.ldl !== undefined && lr.ldl !== null) { setLdl(String(lr.ldl)); extractedCount++; }
+      if (lr.creatinine !== undefined && lr.creatinine !== null) { setCreatinine(String(lr.creatinine)); extractedCount++; }
+      if (lr.bun !== undefined && lr.bun !== null) { setBun(String(lr.bun)); extractedCount++; }
+      if (lr.egfr !== undefined && lr.egfr !== null) { setEgfr(String(lr.egfr)); extractedCount++; }
+      if (lr.sgot !== undefined && lr.sgot !== null) { setSgot(String(lr.sgot)); extractedCount++; }
+      if (lr.sgpt !== undefined && lr.sgpt !== null) { setSgpt(String(lr.sgpt)); extractedCount++; }
+      if (lr.uricAcid !== undefined && lr.uricAcid !== null) { setUricAcid(String(lr.uricAcid)); extractedCount++; }
+      if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) { setHemoglobin(String(lr.hemoglobin)); extractedCount++; }
+      if (lr.wbc !== undefined && lr.wbc !== null) { setWbc(String(lr.wbc)); extractedCount++; }
+      if (lr.platelet !== undefined && lr.platelet !== null) { setPlatelet(String(lr.platelet)); extractedCount++; }
+
+      if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
+        setCustomItems(lr.customItems);
+        extractedCount += lr.customItems.length;
+      }
+    }
+
+    setIsAiParsed(true);
+    return extractedCount;
+  };
+
+  // Handle Manual Text Parse (Fast Paste)
+  const handleParseTextContent = (textToParse: string, sourceLabel: string) => {
+    if (!textToParse.trim()) {
+      setUploadError("กรุณาวางหรือพิมพ์ข้อความผลตรวจเลือดก่อนทำรายการ");
+      return;
+    }
+
+    setUploadError("");
+    setUploadSuccess("");
+
+    const parsed = parseLabTextWithRegex(textToParse, sourceLabel);
+    const count = applyParsedDataToForm(parsed);
+
+    if (count > 0 || parsed.hospital || parsed.patientName) {
+      setUploadSuccess(`ถอดรหัสจากข้อความสำเร็จ! พบ ${count > 0 ? `${count} รายการผลแล็บ` : 'ข้อมูลเบื้องต้น'} ข้อมูลถูกเติมลงในแบบฟอร์มด้านล่างแล้ว`);
+    } else {
+      setUploadError("ไม่พบตัวเลขผลแล็บที่เข้าคู่ในข้อความที่วาง กรุณาตรวจสอบว่ามีข้อความชื่อการตรวจและตัวเลข เช่น 'FBS 95' หรือ 'HbA1c 6.2'");
+    }
+  };
+
   // Handle PDF / File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -118,6 +184,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     setHospital("");
     setDiagnosis("");
     setDoctorNotes("");
+    setRawTextContent("");
 
     try {
       // 1. Client-side PDF text & page image extraction
@@ -138,148 +205,64 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
         if (imgDataUrl) renderedPageImages = [imgDataUrl];
       }
 
-      // 2. Immediate Local RegEx parsing as instant fallback
+      setRawTextContent(extractedText);
+
+      // 2. Immediate Local RegEx parsing
       let localParsed = parseLabTextWithRegex(extractedText, file.name);
+      let localCount = 0;
 
       if (localParsed) {
-        if (localParsed.hospital) setHospital(localParsed.hospital);
-        if (localParsed.patientName) setPatientName(localParsed.patientName);
-        if (localParsed.date) setDate(localParsed.date);
-        if (localParsed.title) setTitle(localParsed.title);
-
-        if (localParsed.labResults) {
-          const lr = localParsed.labResults;
-          if (lr.fbs !== undefined) setFbs(String(lr.fbs));
-          if (lr.hba1c !== undefined) setHba1c(String(lr.hba1c));
-          if (lr.cholesterol !== undefined) setCholesterol(String(lr.cholesterol));
-          if (lr.triglyceride !== undefined) setTriglyceride(String(lr.triglyceride));
-          if (lr.hdl !== undefined) setHdl(String(lr.hdl));
-          if (lr.ldl !== undefined) setLdl(String(lr.ldl));
-          if (lr.creatinine !== undefined) setCreatinine(String(lr.creatinine));
-          if (lr.egfr !== undefined) setEgfr(String(lr.egfr));
-          if (lr.bun !== undefined) setBun(String(lr.bun));
-          if (lr.sgot !== undefined) setSgot(String(lr.sgot));
-          if (lr.sgpt !== undefined) setSgpt(String(lr.sgpt));
-          if (lr.uricAcid !== undefined) setUricAcid(String(lr.uricAcid));
-          if (lr.hemoglobin !== undefined) setHemoglobin(String(lr.hemoglobin));
-          if (lr.wbc !== undefined) setWbc(String(lr.wbc));
-          if (lr.platelet !== undefined) setPlatelet(String(lr.platelet));
-          if (lr.customItems && lr.customItems.length > 0) {
-            setCustomItems(lr.customItems);
-          }
-        }
+        localCount = applyParsedDataToForm(localParsed);
       }
 
-      // 3. Convert raw file to base64 if small enough (< 8MB)
-      let base64Data = "";
-      if (file.size < 8 * 1024 * 1024) {
-        base64Data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string) || "");
-          reader.onerror = () => resolve("");
-          reader.readAsDataURL(file);
-        });
-      }
-
-      // 4. Send request to backend API
+      // 3. Optional Server-side parse if available
       let serverParsedSuccess = false;
-      try {
-        const detectedMime = file.type || 
-          (file.name.toLowerCase().endsWith(".png") ? "image/png" :
-           file.name.toLowerCase().endsWith(".webp") ? "image/webp" :
-           file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+      if (file.size < 8 * 1024 * 1024) {
+        try {
+          const base64Data = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string) || "");
+            reader.onerror = () => resolve("");
+            reader.readAsDataURL(file);
+          });
 
-        const res = await fetch("/api/ai/parse-lab-report", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileData: base64Data,
-            pageImages: renderedPageImages,
-            fileType: detectedMime,
-            fileName: file.name,
-            textContent: extractedText,
-          }),
-        });
+          const detectedMime = file.type || 
+            (file.name.toLowerCase().endsWith(".png") ? "image/png" :
+             file.name.toLowerCase().endsWith(".webp") ? "image/webp" :
+             file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
 
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-          const data = await res.json();
-          if (data.success && data.data) {
-            const parsed = data.data;
+          const res = await fetch("/api/ai/parse-lab-report", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fileData: base64Data,
+              pageImages: renderedPageImages,
+              fileType: detectedMime,
+              fileName: file.name,
+              textContent: extractedText,
+            }),
+          });
 
-            if (parsed.title) setTitle(parsed.title);
-            if (parsed.hospital) setHospital(parsed.hospital);
-            if (parsed.patientName) setPatientName(parsed.patientName);
-            if (parsed.date) setDate(parsed.date);
-            if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
-            if (parsed.doctorNotes) setDoctorNotes(parsed.doctorNotes);
-
-            let extractedCount = 0;
-
-            if (parsed.labResults) {
-              const lr = parsed.labResults;
-              if (lr.fbs !== undefined && lr.fbs !== null) { setFbs(String(lr.fbs)); extractedCount++; }
-              if (lr.hba1c !== undefined && lr.hba1c !== null) { setHba1c(String(lr.hba1c)); extractedCount++; }
-              if (lr.cholesterol !== undefined && lr.cholesterol !== null) { setCholesterol(String(lr.cholesterol)); extractedCount++; }
-              if (lr.triglyceride !== undefined && lr.triglyceride !== null) { setTriglyceride(String(lr.triglyceride)); extractedCount++; }
-              if (lr.hdl !== undefined && lr.hdl !== null) { setHdl(String(lr.hdl)); extractedCount++; }
-              if (lr.ldl !== undefined && lr.ldl !== null) { setLdl(String(lr.ldl)); extractedCount++; }
-              if (lr.creatinine !== undefined && lr.creatinine !== null) { setCreatinine(String(lr.creatinine)); extractedCount++; }
-              if (lr.bun !== undefined && lr.bun !== null) { setBun(String(lr.bun)); extractedCount++; }
-              if (lr.egfr !== undefined && lr.egfr !== null) { setEgfr(String(lr.egfr)); extractedCount++; }
-              if (lr.sgot !== undefined && lr.sgot !== null) { setSgot(String(lr.sgot)); extractedCount++; }
-              if (lr.sgpt !== undefined && lr.sgpt !== null) { setSgpt(String(lr.sgpt)); extractedCount++; }
-              if (lr.uricAcid !== undefined && lr.uricAcid !== null) { setUricAcid(String(lr.uricAcid)); extractedCount++; }
-              if (lr.hemoglobin !== undefined && lr.hemoglobin !== null) { setHemoglobin(String(lr.hemoglobin)); extractedCount++; }
-              if (lr.wbc !== undefined && lr.wbc !== null) { setWbc(String(lr.wbc)); extractedCount++; }
-              if (lr.platelet !== undefined && lr.platelet !== null) { setPlatelet(String(lr.platelet)); extractedCount++; }
-
-              if (Array.isArray(lr.customItems) && lr.customItems.length > 0) {
-                setCustomItems(lr.customItems);
-                extractedCount += lr.customItems.length;
-              }
-            }
-            serverParsedSuccess = true;
-            if (extractedCount > 0 || parsed.hospital || parsed.patientName) {
-              setUploadSuccess(`วิเคราะห์และดึงข้อมูลจากไฟล์ "${file.name}" สำเร็จ (${extractedCount > 0 ? `${extractedCount} รายการผลแล็บ` : 'ข้อมูลเบื้องต้น'})! กรุณาตรวจสอบและปรับแก้ไขในแบบฟอร์มด้านล่างได้ทันที`);
-            } else {
-              setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await res.json();
+            if (data.success && data.data) {
+              const serverCount = applyParsedDataToForm(data.data);
+              serverParsedSuccess = true;
+              setUploadSuccess(`วิเคราะห์ไฟล์ "${file.name}" สำเร็จ (${serverCount} รายการผลแล็บ)! กรุณาตรวจสอบข้อมูลและปรับแก้ไขในแบบฟอร์มด้านล่างได้ทันที`);
             }
           }
+        } catch (apiErr) {
+          console.warn("Server AI Lab parse notice:", apiErr);
         }
-      } catch (apiErr) {
-        console.warn("Server AI Lab parse request notice:", apiErr);
       }
-
-      setIsAiParsed(true);
-      setUploadError("");
 
       if (!serverParsedSuccess) {
-        let localCount = 0;
-        if (localParsed && localParsed.labResults) {
-          const lr = localParsed.labResults;
-          if (lr.fbs !== undefined) localCount++;
-          if (lr.hba1c !== undefined) localCount++;
-          if (lr.cholesterol !== undefined) localCount++;
-          if (lr.triglyceride !== undefined) localCount++;
-          if (lr.hdl !== undefined) localCount++;
-          if (lr.ldl !== undefined) localCount++;
-          if (lr.creatinine !== undefined) localCount++;
-          if (lr.egfr !== undefined) localCount++;
-          if (lr.bun !== undefined) localCount++;
-          if (lr.sgot !== undefined) localCount++;
-          if (lr.sgpt !== undefined) localCount++;
-          if (lr.uricAcid !== undefined) localCount++;
-          if (lr.hemoglobin !== undefined) localCount++;
-          if (lr.wbc !== undefined) localCount++;
-          if (lr.platelet !== undefined) localCount++;
-          if (lr.customItems) localCount += lr.customItems.length;
-        }
-
         if (localCount > 0 || (localParsed && (localParsed.hospital || localParsed.patientName))) {
           setUploadSuccess(`ถอดรหัสและดึงข้อมูลจากไฟล์ "${file.name}" สำเร็จ (${localCount > 0 ? `${localCount} รายการผลแล็บ` : 'ข้อมูลเบื้องต้น'})! กรุณาตรวจสอบข้อมูลและปรับแก้ไขในแบบฟอร์มด้านล่างได้ทันที`);
         } else {
-          setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ สามารถพิมพ์กรอกตัวเลขในแบบฟอร์มด้านล่างเพิ่มเติมได้ทันที`);
+          setUploadSuccess(`อัปโหลดไฟล์ "${file.name}" เรียบร้อย! หากค่าผลตรวจไม่ปรากฏ คุณสามารถก๊อปปี้ข้อความจาก PDF มาวางในช่อง "วางข้อความคัดลอกจาก PDF" เพื่อให้ระบบถอดรหัสได้ 100%`);
+          setShowRawInspector(true);
         }
       }
     } catch (err: any) {
@@ -349,7 +332,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              อัปโหลดไฟล์ PDF ผลแล็บตรวจเลือดเพื่อดึงข้อมูลอัตโนมัติ หรือกรอกข้อมูลด้วยตนเอง สำหรับ{" "}
+              อัปโหลดไฟล์ PDF ผลแล็บตรวจเลือดเพื่อดึงข้อมูลอัตโนมัติ หรือก๊อปปี้ข้อความมาวาง สำหรับ{" "}
               <strong className="text-emerald-700">{profileName}</strong>
             </p>
           </div>
@@ -367,7 +350,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
             }`}
           >
             <Sparkles className="w-4 h-4 text-emerald-600" />
-            <span>อัปโหลดไฟล์ PDF ผลตรวจเลือด (AI Auto Read)</span>
+            <span>นำเข้าข้อมูลจาก PDF / รูปภาพ / คัดลอกข้อความ</span>
           </button>
           <button
             type="button"
@@ -383,44 +366,104 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
           </button>
         </div>
 
-        {/* PDF Upload Zone */}
+        {/* PDF / Paste Zone */}
         {activeTab === "pdf" && (
-          <div className="bg-emerald-50/60 border-2 border-dashed border-emerald-300 rounded-2xl p-5 text-center mb-6 space-y-3">
-            <div className="w-12 h-12 bg-white text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-xs border border-emerald-200">
-              <Upload className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="font-bold text-sm text-emerald-950">
-                เลือกหรือลากไฟล์ PDF ผลตรวจเลือด / ผลตรวจแล็บประจำปี
-              </p>
-              <p className="text-[11px] text-emerald-700 mt-0.5">
-                รองรับไฟล์ PDF (.pdf) และไฟล์รูปภาพผลแล็บ (.png, .jpg) ระบบ AI จะถอดค่าตัวเลข ชื่อ รพ. และวันที่ตรงตามเอกสาร 100%
-              </p>
+          <div className="bg-emerald-50/60 border-2 border-emerald-300 rounded-2xl p-4 mb-6 space-y-3">
+            {/* Sub Mode Toggle */}
+            <div className="flex items-center justify-center gap-2 pb-2 border-b border-emerald-200/60">
+              <button
+                type="button"
+                onClick={() => setPdfMode("file")}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  pdfMode === "file"
+                    ? "bg-emerald-700 text-white shadow-xs"
+                    : "bg-white text-slate-600 hover:bg-emerald-100 border border-slate-200"
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>1. เลือกไฟล์ PDF / รูปภาพ</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPdfMode("paste")}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  pdfMode === "paste"
+                    ? "bg-emerald-700 text-white shadow-xs"
+                    : "bg-white text-slate-600 hover:bg-emerald-100 border border-slate-200"
+                }`}
+              >
+                <ClipboardList className="w-3.5 h-3.5" />
+                <span>2. วางข้อความคัดลอกจาก PDF (ชัวร์ 100%)</span>
+              </button>
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
-              <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer">
-                {isUploading ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>กำลังอ่านไฟล์ PDF และดึงค่าผลตรวจเลือด...</span>
-                  </>
-                ) : (
-                  <>
-                    <FileText className="w-4 h-4" />
-                    <span>เลือกไฟล์ PDF ผลตรวจเลือด</span>
-                  </>
-                )}
-                <input
-                  type="file"
-                  accept=".pdf,image/*"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                  className="hidden"
+            {pdfMode === "file" ? (
+              <div className="text-center space-y-3 py-2">
+                <div className="w-10 h-10 bg-white text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-xs border border-emerald-200">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-xs text-emerald-950">
+                    เลือกหรือลากไฟล์ PDF ผลตรวจเลือด / ผลตรวจแล็บประจำปี
+                  </p>
+                  <p className="text-[10px] text-emerald-700 mt-0.5">
+                    รองรับไฟล์ PDF (.pdf) และไฟล์รูปภาพ (.png, .jpg) ระบบจะถอดรหัสอ่านข้อมูลตรงตามเอกสาร
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+                  <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer">
+                    {isUploading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>กำลังอ่านไฟล์ PDF และถอดรหัส...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="w-4 h-4" />
+                        <span>เลือกไฟล์ PDF / รูปภาพผลตรวจ</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".pdf,image/*"
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 py-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <ClipboardList className="w-4 h-4 text-emerald-700" />
+                    <span>ก๊อปปี้ข้อความทั้งหมดในไฟล์ PDF แล้วนำมาวางในช่องด้านล่างนี้:</span>
+                  </label>
+                  <span className="text-[10px] text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full font-bold">
+                    💡 เปิด PDF &gt; กด Ctrl+A (เลือกหมด) &gt; Ctrl+C (ก๊อปปี้)
+                  </span>
+                </div>
+                <textarea
+                  rows={4}
+                  value={pastedText}
+                  onChange={(e) => setPastedText(e.target.value)}
+                  placeholder="วางข้อความที่ก๊อปปี้จาก PDF หรือผลตรวจเลือดตรงนี้ เช่น:&#10;Fasting Blood Sugar 95 mg/dL (70-99)&#10;HbA1c 5.8 %&#10;Cholesterol 195 mg/dL&#10;Triglyceride 120 mg/dL..."
+                  className="w-full bg-white border border-emerald-300 rounded-xl p-3 text-xs font-mono text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
-              </label>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => handleParseTextContent(pastedText, "ข้อความที่ก๊อปปี้มาวาง")}
+                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>⚡ ถอดรหัสข้อความและเติมค่าลงแบบฟอร์มทันที</span>
+                </button>
+              </div>
+            )}
 
+            {/* Status Messages */}
             {uploadSuccess && (
               <div className="bg-emerald-100 border border-emerald-300 text-emerald-900 p-3 rounded-xl text-xs font-bold flex items-center gap-2 text-left">
                 <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
@@ -432,6 +475,42 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
               <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs font-bold flex items-center gap-2 text-left">
                 <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
                 <span>{uploadError}</span>
+              </div>
+            )}
+
+            {/* Inspect / Edit Raw Extracted Text */}
+            {rawTextContent && (
+              <div className="border-t border-emerald-200/80 pt-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRawInspector(!showRawInspector)}
+                  className="text-xs text-emerald-800 hover:text-emerald-950 font-bold flex items-center gap-1.5 cursor-pointer underline decoration-dotted"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>{showRawInspector ? "ซ่อนข้อความที่ถอดได้จาก PDF" : "🔍 ดู/แก้ไข ข้อความที่ระบบถอดได้จาก PDF ล่าสุด"}</span>
+                </button>
+
+                {showRawInspector && (
+                  <div className="mt-2 space-y-2 bg-white/80 p-3 rounded-xl border border-emerald-200">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      ข้อความที่ PDF.js อ่านได้จากไฟล์ (สามารถปรับแก้ไขตัวเลขตรงนี้แล้วกดปุ่มวิเคราะห์ซ้ำได้):
+                    </label>
+                    <textarea
+                      rows={5}
+                      value={rawTextContent}
+                      onChange={(e) => setRawTextContent(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-[11px] font-mono text-slate-800 focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleParseTextContent(rawTextContent, pdfFileName || "ข้อความ PDF")}
+                      className="px-4 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>🔄 ถอดรหัสข้อมูลจากข้อความด้านบนนี้อีกครั้ง</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -506,7 +585,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
               </h4>
               {isAiParsed && (
                 <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                  <FileCheck className="w-3 h-3" /> ถอดจาก PDF เรียบร้อย
+                  <FileCheck className="w-3 h-3" /> ถอดข้อมูลเรียบร้อย
                 </span>
               )}
             </div>
@@ -638,7 +717,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                     placeholder="-"
                     value={egfr}
                     onChange={(e) => setEgfr(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-slate-900 text-xs"
+                    className="w-full bg-white border border-slate-300 rounded-lg py-1.5 px-2 font-bold text-blue-900 text-xs"
                   />
                   <span className="absolute right-1.5 top-2 text-[9px] text-slate-400">mL/min</span>
                 </div>
@@ -711,64 +790,65 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
               </div>
             </div>
 
-            {/* Custom Lab Items */}
-            <div className="pt-2 border-t border-slate-200 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-[11px] font-extrabold text-slate-700">
+            {/* Custom Extra Items */}
+            <div className="pt-3 border-t border-slate-200">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700">
                   รายการตรวจเพิ่มเติมจากเอกสาร ({customItems.length} รายการ)
                 </span>
                 <button
                   type="button"
                   onClick={handleAddCustomItem}
-                  className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] font-bold rounded-lg flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
                 >
-                  <Plus className="w-3 h-3" /> เพิ่มรายการตรวจ
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>เพิ่มรายการตรวจ</span>
                 </button>
               </div>
 
-              {customItems.map((item, idx) => (
-                <div key={idx} className="flex gap-2 items-center text-xs bg-white p-2 rounded-xl border border-slate-200">
-                  <input
-                    type="text"
-                    placeholder="ชื่อรายการตรวจ เช่น Microalbumin"
-                    value={item.testName}
-                    onChange={(e) => handleCustomItemChange(idx, "testName", e.target.value)}
-                    className="flex-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold"
-                  />
-                  <input
-                    type="text"
-                    placeholder="ผลตรวจ"
-                    value={item.resultValue}
-                    onChange={(e) => handleCustomItemChange(idx, "resultValue", e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold"
-                  />
-                  <input
-                    type="text"
-                    placeholder="หน่วย"
-                    value={item.unit || ""}
-                    onChange={(e) => handleCustomItemChange(idx, "unit", e.target.value)}
-                    className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]"
-                  />
-                  <input
-                    type="text"
-                    placeholder="ค่าปกติอ้างอิง"
-                    value={item.refRange || ""}
-                    onChange={(e) => handleCustomItemChange(idx, "refRange", e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveCustomItem(idx)}
-                    className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+              {customItems.length > 0 && (
+                <div className="space-y-2 max-h-48 overflow-y-auto p-1">
+                  {customItems.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-12 gap-1.5 items-center bg-white p-2 rounded-xl border border-slate-200 shadow-2xs"
+                    >
+                      <input
+                        type="text"
+                        placeholder="ชื่อผลตรวจ (เช่น Sodium, Electrolyte)"
+                        value={item.testName}
+                        onChange={(e) => handleCustomItemChange(idx, "testName", e.target.value)}
+                        className="col-span-5 bg-slate-50 border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-slate-900"
+                      />
+                      <input
+                        type="text"
+                        placeholder="ค่าที่ได้ (เช่น 138)"
+                        value={item.resultValue}
+                        onChange={(e) => handleCustomItemChange(idx, "resultValue", e.target.value)}
+                        className="col-span-3 bg-slate-50 border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-emerald-900"
+                      />
+                      <input
+                        type="text"
+                        placeholder="หน่วย (เช่น mmol/L)"
+                        value={item.unit || ""}
+                        onChange={(e) => handleCustomItemChange(idx, "unit", e.target.value)}
+                        className="col-span-3 bg-slate-50 border border-slate-300 rounded-lg p-1.5 text-xs text-slate-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomItem(idx)}
+                        className="col-span-1 text-slate-400 hover:text-rose-600 p-1 flex items-center justify-center cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
-          {/* Doctor Comments */}
+          {/* Diagnosis & Notes */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -779,7 +859,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 value={diagnosis}
                 onChange={(e) => setDiagnosis(e.target.value)}
                 placeholder="เช่น ผลเลือดอยู่ในเกณฑ์ดี ค่าน้ำตาลสะสมอยู่ในระดับควบคุมได้"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
             </div>
 
@@ -792,26 +872,26 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
                 value={doctorNotes}
                 onChange={(e) => setDoctorNotes(e.target.value)}
                 placeholder="เช่น ออกกำลังกายสม่ำเสมอ ลดอาหารรสเค็ม นัดตรวจติดตามอีก 3 เดือน"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 pt-3 border-t border-slate-100">
+          {/* Submit Buttons */}
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-all cursor-pointer"
+              className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 font-bold text-xs transition-colors cursor-pointer"
             >
               ยกเลิก
             </button>
             <button
               type="submit"
-              className="flex-2 py-3 rounded-2xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Save className="w-4 h-4" />
-              <span>บันทึกผลตรวจเลือดลงระบบ (Save Record)</span>
+              <span>บันทึกผลตรวจเลือดเข้าสู่ระบบ</span>
             </button>
           </div>
         </form>

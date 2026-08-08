@@ -1,8 +1,13 @@
 import * as pdfjsLib from "pdfjs-dist";
 
-// Configure worker URL for browser environments
+// Configure worker URL for browser environments with resilient fallbacks
 if (typeof window !== "undefined" && pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version || "3.11.174"}/build/pdf.worker.min.js`;
+  try {
+    const version = pdfjsLib.version || "3.11.174";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.js`;
+  } catch (e) {
+    console.warn("PDF.js worker setup fallback notice:", e);
+  }
 }
 
 export async function extractTextFromPdfFile(file: File): Promise<string> {
@@ -11,6 +16,7 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useSystemFonts: true,
+      isEvalSupported: false,
     });
     
     const pdf = await loadingTask.promise;
@@ -27,18 +33,19 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
       const posItems = items
         .filter((item: any) => item && typeof item.str === "string" && item.str.length > 0)
         .map((item: any) => ({
-          str: item.str,
+          str: item.str.trim(),
           x: item.transform ? item.transform[4] : 0,
           y: item.transform ? item.transform[5] : 0,
-        }));
+        }))
+        .filter(i => i.str.length > 0);
 
       // Sort by Y coordinate descending (top of page to bottom)
       posItems.sort((a, b) => b.y - a.y);
 
-      // Group items into lines where Y difference <= 4 points
+      // Group items into lines where Y difference <= 8 points (more lenient for varied font baselines)
       const lineGroups: typeof posItems[] = [];
       for (const item of posItems) {
-        const existingLine = lineGroups.find(g => Math.abs(g[0].y - item.y) <= 4);
+        const existingLine = lineGroups.find(g => Math.abs(g[0].y - item.y) <= 8);
         if (existingLine) {
           existingLine.push(item);
         } else {
@@ -53,7 +60,9 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
       }).filter(lineStr => lineStr.length > 0);
 
       const pageText = pageLines.join("\n");
-      fullText += `--- Page ${pageNum} ---\n` + pageText + "\n\n";
+      const rawWordStream = posItems.map(i => i.str).join(" ");
+
+      fullText += `--- Page ${pageNum} ---\n` + pageText + "\n" + rawWordStream + "\n\n";
     }
 
     return fullText.trim();
@@ -69,6 +78,7 @@ export async function renderPdfPagesToImages(file: File, maxPages = 3): Promise<
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useSystemFonts: true,
+      isEvalSupported: false,
     });
     
     const pdf = await loadingTask.promise;
@@ -135,60 +145,76 @@ export interface ParsedLabReport {
 }
 
 /**
+ * Clean reference ranges and non-value numbers from a block of text
+ */
+function extractCandidateNumbers(block: string): number[] {
+  if (!block) return [];
+
+  let clean = block;
+
+  // 1. Remove obvious date strings e.g. 08/08/2026, 2026-08-08, 2569/08/08
+  clean = clean.replace(/\b\d{1,4}[\/\.-]\d{1,2}[\/\.-]\d{1,4}\b/g, " ");
+
+  // 2. Remove explicit range patterns like "70 - 99", "70.0 - 99.0", "70.0-99.0", "4.0-6.0", "13.5-17.5"
+  clean = clean.replace(/\d+(?:\.\d+)?\s*[-–—~]\s*\d+(?:\.\d+)?/g, " ");
+
+  // 3. Remove comparison operator ranges like "< 200", "<200", "> 40", ">= 60", "<= 100"
+  clean = clean.replace(/(?:<|>|<=|>=)\s*\d+(?:\.\d+)?/gi, " ");
+
+  // 4. Remove reference range headers / brackets if they don't contain sole numbers
+  clean = clean.replace(/Ref(?:erence)?\s*Range[^\n\r]*/gi, " ");
+
+  // 5. Remove unit multipliers e.g. 1.73m2, 10^3, 10^6, /uL
+  clean = clean.replace(/1\.73\s*m\^?2?/gi, " ").replace(/10\^\d+/g, " ");
+
+  // Find all remaining numeric tokens
+  const tokens = clean.match(/\b\d+(?:\.\d+)?\b/g);
+  if (!tokens) return [];
+
+  const candidates: number[] = [];
+  for (const t of tokens) {
+    const num = parseFloat(t);
+    if (!isNaN(num) && num >= 0 && num < 100000) {
+      // Ignore Thai Buddhist years (2550 - 2575) if integer
+      if (num >= 2550 && num <= 2575 && Number.isInteger(num)) continue;
+      // Ignore common page numbers or document years
+      if (num >= 2020 && num <= 2030 && Number.isInteger(num)) continue;
+      candidates.push(num);
+    }
+  }
+
+  return candidates;
+}
+
+/**
  * Smart multi-strategy lab value finder for client-side text parsing.
- * Strips out reference ranges, units, dates, and matches aliases in 1-3 line windows.
+ * Supports row-by-row, colon-separated, and multi-line sliding windows (up to 12 lines).
  */
 function findLabValueInText(text: string, aliases: string[]): number | undefined {
   if (!text) return undefined;
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
 
-  const extractFromBlock = (block: string): number | undefined => {
-    // 1. Strip reference ranges in parens e.g. (70-99), (4.0-6.0), (<200)
-    let clean = block
-      .replace(/\([\s\S]*?\)/g, " ")
-      .replace(/\[[\s\S]*?\]/g, " ");
-
-    // 2. Strip explicit range expressions e.g. "70.0 - 99.0", "< 200", "> 40"
-    clean = clean
-      .replace(/\d+(?:\.\d+)?\s*[-–—~]\s*\d+(?:\.\d+)?/g, " ")
-      .replace(/(?:<|>|<=|>=)\s*\d+(?:\.\d+)?/gi, " ");
-
-    // 3. Strip dates e.g. "26/08/2026", "2026-08-26"
-    clean = clean.replace(/\d{1,4}[\/\.-]\d{1,2}[\/\.-]\d{1,4}/g, " ");
-
-    // 4. Strip unit artifacts e.g. "1.73m2", "10^3"
-    clean = clean.replace(/1\.73\s*m\^?2?/gi, " ").replace(/10\^\d+/g, " ");
-
-    // Extract all candidate numbers
-    const matches = clean.match(/\b\d+(?:\.\d+)?\b/g);
-    if (!matches) return undefined;
-
-    for (const m of matches) {
-      const num = parseFloat(m);
-      if (!isNaN(num) && num > 0 && num < 40000) {
-        // Skip Thai Buddhist years (2560 - 2575) if integer
-        if (num >= 2560 && num <= 2575 && Number.isInteger(num)) continue;
-        return num;
-      }
-    }
-    return undefined;
-  };
-
-  // 1. Single line search
+  // Strategy 1: Direct Line Matching (Search line containing alias)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lowerLine = line.toLowerCase();
-    const hasAlias = aliases.some(alias => lowerLine.includes(alias.toLowerCase()));
 
-    if (hasAlias) {
-      const val = extractFromBlock(line);
-      if (val !== undefined) return val;
+    for (const alias of aliases) {
+      const lowerAlias = alias.toLowerCase();
+      if (lowerLine.includes(lowerAlias)) {
+        // Try extracting numbers from the same line first
+        const numsOnLine = extractCandidateNumbers(line);
+        if (numsOnLine.length > 0) {
+          return numsOnLine[0];
+        }
 
-      // 2. Look at 2-3 line sliding window for multi-line table layouts
-      if (i + 1 < lines.length) {
-        const windowText = lines.slice(i, i + 3).join(" ");
-        const windowVal = extractFromBlock(windowText);
-        if (windowVal !== undefined) return windowVal;
+        // Strategy 2: Multi-line window search (Look up to 8 lines ahead for table/column splits)
+        const windowLines = lines.slice(i, Math.min(i + 8, lines.length));
+        const windowText = windowLines.join(" ");
+        const numsInWindow = extractCandidateNumbers(windowText);
+        if (numsInWindow.length > 0) {
+          return numsInWindow[0];
+        }
       }
     }
   }
@@ -223,8 +249,8 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
   } else if (/พระราม|Praram/i.test(text)) {
     result.hospital = "โรงพยาบาลพระรามเก้า";
   } else {
-    const hMatch = text.match(/(?:โรงพยาบาล|คลินิก|ศูนย์แล็บ|ห้องปฏิบัติการ|Hospital|Clinic|Lab)\s*([ก-๙a-zA-Z0-9\s]+)/i);
-    if (hMatch) result.hospital = hMatch[0].trim();
+    const hMatch = text.match(/(?:โรงพยาบาล|คลินิก|ศูนย์แล็บ|ห้องปฏิบัติการ|Hospital|Clinic|Lab)\s*[:\s]*([ก-๙a-zA-Z0-9\s]+)/i);
+    if (hMatch && hMatch[1]) result.hospital = hMatch[0].trim();
   }
 
   // 2. Patient Name Detection
@@ -236,9 +262,9 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
     }
   }
 
-  // 3. Date Detection (Supports Western YYYY-MM-DD, DD/MM/YYYY and Thai BE Years 2560-2575)
-  const dateMatch = text.match(/(\d{1,2})[-/](\d{1,2})[-/](20\d{2}|25\d{2})/) ||
-                    text.match(/(20\d{2}|25\d{2})[-/](\d{1,2})[-/](\d{1,2})/);
+  // 3. Date Detection (Supports YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY and Thai BE Years 2560-2575)
+  const dateMatch = text.match(/(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2}|25\d{2})/) ||
+                    text.match(/(20\d{2}|25\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (dateMatch) {
     let yearNum = 2026;
     let monthStr = "01";
@@ -263,15 +289,15 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
   const lr: NonNullable<ParsedLabReport["labResults"]> = { customItems: [] };
 
   // 4. Standard Blood Lab Items Extraction (English & Thai Aliases)
-  lr.fbs = findLabValueInText(text, ["Fasting Blood Sugar", "Fasting Glucose", "Glucose", "FBS", "Blood Sugar", "น้ำตาลในเลือด", "น้ำตาล", "FPG"]);
-  lr.hba1c = findLabValueInText(text, ["HbA1c", "Hemoglobin A1c", "A1C", "Glycated Hemoglobin", "น้ำตาลสะสม"]);
+  lr.fbs = findLabValueInText(text, ["Fasting Blood Sugar", "Fasting Glucose", "Glucose", "FBS", "Blood Sugar", "น้ำตาลในเลือด", "น้ำตาล", "FPG", "GLU"]);
+  lr.hba1c = findLabValueInText(text, ["HbA1c", "Hemoglobin A1c", "A1C", "Glycated Hemoglobin", "น้ำตาลสะสม", "Hb A1c"]);
   lr.cholesterol = findLabValueInText(text, ["Total Cholesterol", "Cholesterol", "CHOL", "ไขมันรวม", "คอเลสเตอรอล"]);
   lr.triglyceride = findLabValueInText(text, ["Triglyceride", "Triglycerides", "TRIG", "ไตรกลีเซอไรด์"]);
   lr.hdl = findLabValueInText(text, ["HDL-Cholesterol", "HDL-C", "HDL", "ไขมันดี", "เอชดีแอล"]);
-  lr.ldl = findLabValueInText(text, ["LDL-Cholesterol", "LDL-C", "LDL", "ไขมันเลว", "แอลดีแอล"]);
+  lr.ldl = findLabValueInText(text, ["LDL-Cholesterol", "LDL-C", "LDL", "Direct LDL", "ไขมันเลว", "แอลดีแอล"]);
   lr.creatinine = findLabValueInText(text, ["Creatinine", "Cr", "Blood Creatinine", "ครีเอตินีน", "ค่าไต"]);
-  lr.egfr = findLabValueInText(text, ["eGFR", "e-GFR", "GFR", "Estimated GFR", "อัตราการกรองของไต"]);
-  lr.bun = findLabValueInText(text, ["BUN", "Blood Urea Nitrogen", "ยูเรียไนโตรเจน"]);
+  lr.egfr = findLabValueInText(text, ["eGFR", "e-GFR", "GFR", "Estimated GFR", "CKD-EPI", "อัตราการกรองของไต"]);
+  lr.bun = findLabValueInText(text, ["BUN", "Blood Urea Nitrogen", "Urea", "ยูเรียไนโตรเจน"]);
   lr.sgot = findLabValueInText(text, ["SGOT", "AST", "เอสจีโอที", "เอเอสที"]);
   lr.sgpt = findLabValueInText(text, ["SGPT", "ALT", "เอสจีพีที", "เอแอลที"]);
   lr.uricAcid = findLabValueInText(text, ["Uric Acid", "Uric", "กรดยูริก"]);
@@ -308,9 +334,9 @@ export function parseLabTextWithRegex(text: string, fileName?: string): ParsedLa
   // 6. Generic Table Row Extraction for any other lab tests
   const lines = text.split(/\r?\n/);
   const knownTokens = [
-    "fbs", "glucose", "hba1c", "cholesterol", "triglyceride", "triglycerides", "hdl", "ldl",
-    "creatinine", "egfr", "bun", "sgot", "ast", "sgpt", "alt", "uric", "hemoglobin", "hb",
-    "wbc", "platelet", "platelets", "hospital", "patient", "page", "date", "name", "age",
+    "fbs", "glucose", "glu", "hba1c", "cholesterol", "chol", "triglyceride", "triglycerides", "trig", "hdl", "ldl",
+    "creatinine", "cr", "egfr", "gfr", "bun", "sgot", "ast", "sgpt", "alt", "uric", "hemoglobin", "hb", "hgb",
+    "wbc", "platelet", "platelets", "plt", "hospital", "patient", "page", "date", "name", "age",
     "รามาธิบดี", "ศิริราช", "จุฬา", "กรุงเทพ", "ผลตรวจ", "วันที่", "ชื่อ", "รายงาน"
   ];
 
