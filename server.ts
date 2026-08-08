@@ -236,7 +236,13 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       let contents: any[] = [];
       if (fileData && fileData.includes("base64,")) {
         const base64Clean = fileData.split("base64,")[1];
-        const mime = fileType || (fileData.includes("data:application/pdf") ? "application/pdf" : "image/jpeg");
+        let mime = fileType;
+        if (!mime || mime === "application/octet-stream" || mime === "") {
+          if (fileData.startsWith("data:application/pdf")) mime = "application/pdf";
+          else if (fileData.startsWith("data:image/png")) mime = "image/png";
+          else if (fileData.startsWith("data:image/webp")) mime = "image/webp";
+          else mime = "image/jpeg";
+        }
         contents = [
           {
             inlineData: {
@@ -253,7 +259,7 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       }
 
       let rawText = "";
-      const modelsToTry = ["gemini-3.6-flash", "gemini-flash-latest"];
+      const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
 
       for (const modelName of modelsToTry) {
         try {
@@ -269,12 +275,12 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
           rawText = response.text || "";
           if (rawText) break;
         } catch (mErr) {
-          console.warn(`Model ${modelName} failed for lab report parsing, trying next...`, mErr);
+          console.warn(`Model ${modelName} JSON mode failed, trying next model or mode...`, mErr);
         }
       }
 
       if (!rawText) {
-        // Fallback without responseMimeType if json mode failed on older model
+        // Fallback without responseMimeType
         for (const modelName of modelsToTry) {
           try {
             const response = await ai.models.generateContent({
@@ -293,7 +299,12 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
         }
       }
 
-      const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+      let cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanJson = jsonMatch[0];
+      }
+
       let parsedData: any = {};
       try {
         parsedData = JSON.parse(cleanJson);

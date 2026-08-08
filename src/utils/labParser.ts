@@ -73,10 +73,8 @@ function findLabValueInText(text: string, aliases: string[]): number | undefined
   
   // 1. Line-by-line search
   for (const rawLine of lines) {
-    const hasAlias = aliases.some(alias => {
-      const reg = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-      return reg.test(rawLine);
-    });
+    const lowerLine = rawLine.toLowerCase();
+    const hasAlias = aliases.some(alias => lowerLine.includes(alias.toLowerCase()));
 
     if (hasAlias) {
       // Strip reference ranges inside parens or brackets: (70 - 100), (0.67-1.17), [<200]
@@ -84,14 +82,13 @@ function findLabValueInText(text: string, aliases: string[]): number | undefined
         .replace(/\([\d\.\s\-\<\>\:\,]+\)/g, ' ')
         .replace(/\[[\d\.\s\-\<\>\:\,]+\]/g, ' ');
 
-      // Find numbers that come after the alias
-      // Matches numbers like 126, 8.27, 0.71, 119
-      const numberMatches = cleanLine.match(/[:\s=]+(\d+(?:\.\d+)?)/g);
+      // Find numbers that come after the alias or colon/space
+      const numberMatches = cleanLine.match(/(?:[:\s=,\t]+|^)(\d+(?:\.\d+)?)/g);
       if (numberMatches) {
         for (const m of numberMatches) {
-          const valStr = m.replace(/[:\s=]/g, '').trim();
+          const valStr = m.replace(/[^0-9\.]/g, '').trim();
           const val = parseFloat(valStr);
-          if (!isNaN(val) && val > 0) {
+          if (!isNaN(val) && val > 0 && val < 50000) {
             return val;
           }
         }
@@ -103,11 +100,11 @@ function findLabValueInText(text: string, aliases: string[]): number | undefined
   for (const alias of aliases) {
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const cleanText = text.replace(/\([\d\.\s\-\<\>\:\,]+\)/g, ' ');
-    const reg = new RegExp(`${escaped}[^\\d\\n\\r]{0,25}?[:\\s=]+(\\d+(?:\\.\\d+)?)`, 'i');
+    const reg = new RegExp(`${escaped}[^\\d\\n\\r]{0,35}?[:\\s=,\t]+(\\d+(?:\\.\\d+)?)`, 'i');
     const m = cleanText.match(reg);
     if (m && m[1]) {
       const val = parseFloat(m[1]);
-      if (!isNaN(val) && val > 0) return val;
+      if (!isNaN(val) && val > 0 && val < 50000) return val;
     }
   }
 

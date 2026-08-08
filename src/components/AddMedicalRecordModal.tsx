@@ -109,7 +109,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
       let localParsed = parseLabTextWithRegex(extractedText, file.name);
       let hasLocalData = false;
 
-      if (extractedText && extractedText.length > 10) {
+      if (localParsed) {
         if (localParsed.hospital) setHospital(localParsed.hospital);
         if (localParsed.patientName) setPatientName(localParsed.patientName);
         if (localParsed.date) setDate(localParsed.date);
@@ -161,12 +161,17 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
       // 4. Send request to backend API
       let serverParsedSuccess = false;
       try {
+        const detectedMime = file.type || 
+          (file.name.toLowerCase().endsWith(".png") ? "image/png" :
+           file.name.toLowerCase().endsWith(".webp") ? "image/webp" :
+           file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+
         const res = await fetch("/api/ai/parse-lab-report", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fileData: base64Data,
-            fileType: file.type || "application/pdf",
+            fileType: detectedMime,
             fileName: file.name,
             textContent: extractedText,
           }),
