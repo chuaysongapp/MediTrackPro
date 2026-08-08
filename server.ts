@@ -135,7 +135,7 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
 โปรดสรุปผลสุขภาพรายเดือน วิเคราะห์สถานะคลังยาและสัญญาณชีพ พร้อมให้คำแนะนำและข้อควรระวังครับ`;
 
       let responseText = "";
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const modelsToTry = ["gemini-3.6-flash", "gemini-flash-latest"];
       
       for (const modelName of modelsToTry) {
         try {
@@ -253,7 +253,7 @@ ${(medicines || []).map((m: any) => `  * ${m.name} (คงเหลือ ${m.re
       }
 
       let rawText = "";
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const modelsToTry = ["gemini-3.6-flash", "gemini-flash-latest"];
 
       for (const modelName of modelsToTry) {
         try {
