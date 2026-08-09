@@ -2,6 +2,7 @@ import { SystemData, UserProfile } from "../types";
 import { initialSystemData } from "../data/initialData";
 
 const STORAGE_KEY = "med_health_tracker_v1";
+const LOCAL_UPDATED_AT_KEY = "med_health_tracker_local_updatedAt";
 
 export function loadSystemData(): SystemData {
   try {
@@ -33,8 +34,17 @@ export function loadSystemData(): SystemData {
 export function saveSystemData(data: SystemData): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(LOCAL_UPDATED_AT_KEY, new Date().toISOString());
   } catch (e) {
     console.error("Error saving system data to localStorage:", e);
+  }
+}
+
+export function getLocalUpdatedAt(): string | null {
+  try {
+    return localStorage.getItem(LOCAL_UPDATED_AT_KEY);
+  } catch {
+    return null;
   }
 }
 

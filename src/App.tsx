@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { User, onAuthStateChanged } from "firebase/auth";
 import { SystemData, UserProfile, Medicine, MealTime, FoodRelation, HealthVital, DoctorAppointment, LineConfig, MedicalRecord } from "./types";
-import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData } from "./utils/storage";
+import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData, getLocalUpdatedAt } from "./utils/storage";
 import {
   auth,
   loginWithGoogle,
   loginAsGuest,
   logoutUser,
   loadUserDataFromFirestore,
+  loadUserDocFromFirestore,
   saveUserDataToFirestore,
 } from "./lib/firebase";
 import { CloudSyncBanner } from "./components/CloudSyncBanner";
@@ -28,6 +29,9 @@ import { AddProfileModal } from "./components/AddProfileModal";
 import { DoctorReportModal } from "./components/DoctorReportModal";
 import { PwaInstallModal } from "./components/PwaInstallModal";
 import { AddMedicalRecordModal } from "./components/AddMedicalRecordModal";
+import { AppLockGate } from "./components/AppLockGate";
+import { PinSettingsCard } from "./components/PinSettingsCard";
+import { lockEnabled } from "./utils/appLock";
 
 export default function App() {
   const [data, setData] = useState<SystemData>(() => loadInitialData());
@@ -53,12 +57,24 @@ export default function App() {
       setFirebaseUser(user);
       if (user) {
         setIsCloudSaving(true);
-        const cloudData = await loadUserDataFromFirestore(user.uid);
-        if (cloudData && cloudData.profiles && cloudData.profiles.length > 0) {
-          setData(cloudData);
+        const cloudDoc = await loadUserDocFromFirestore(user.uid);
+        const cloudData = cloudDoc?.systemData ?? null;
+        const cloudTs = cloudDoc?.updatedAt;
+        const localTs = getLocalUpdatedAt();
+
+        const cloudHasData = !!(cloudData && cloudData.profiles && cloudData.profiles.length > 0);
+        // Local counts as "newer" only if we actually have a local timestamp AND
+        // it is strictly newer than the cloud copy (ISO strings compare correctly).
+        const localIsNewer = !!(localTs && cloudTs && localTs > cloudTs);
+
+        if (cloudHasData && !localIsNewer) {
+          // Cloud is the source of truth (same or newer than local)
+          setData(cloudData as SystemData);
           setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
         } else {
-          // Push local data to new cloud account on first sign in
+          // Either the cloud is empty, or our local data is newer (e.g. a record was
+          // just added and the debounced cloud save hadn't finished before reload).
+          // Push local up instead of letting a stale/empty cloud wipe it.
           await saveUserDataToFirestore(user.uid, data, {
             email: user.email,
             displayName: user.displayName,
@@ -166,6 +182,8 @@ export default function App() {
   const [showDoctorReportModal, setShowDoctorReportModal] = useState<boolean>(false);
   const [showPwaModal, setShowPwaModal] = useState<boolean>(false);
   const [showAddMedicalRecordModal, setShowAddMedicalRecordModal] = useState<boolean>(false);
+  // App lock: start locked whenever a PIN has been configured (locks on every open/refresh)
+  const [locked, setLocked] = useState<boolean>(() => lockEnabled());
 
   const handleSaveMedicalRecord = (record: Omit<MedicalRecord, "id">) => {
     const newRecord: MedicalRecord = {
@@ -521,6 +539,11 @@ export default function App() {
     }
   };
 
+  // Lock gate — rendered after all hooks so background sync effects keep running.
+  if (locked) {
+    return <AppLockGate onUnlock={() => setLocked(false)} />;
+  }
+
   return (
     <div className={getThemeWrapperClass()}>
       {/* Firebase Cloud Sync Top Banner */}
@@ -643,6 +666,11 @@ export default function App() {
             onOpenEditProfile={(prof) => setEditingProfile(prof)}
             onOpenPwaModal={() => setShowPwaModal(true)}
           />
+        )}
+        {activeTab === "settings" && (
+          <div className="mt-4">
+            <PinSettingsCard profileName={activeProfile?.name} />
+          </div>
         )}
       </main>
 

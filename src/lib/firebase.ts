@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   getDoc,
   setDoc,
@@ -23,10 +24,38 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 
-// Use named firestore database if specified in config
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore with ignoreUndefinedProperties so that records containing
+// undefined fields (e.g. optional lab values that weren't filled in) don't throw
+// "Unsupported field value: undefined" and silently fail the cloud save.
+const firestoreSettings = { ignoreUndefinedProperties: true } as const;
+let dbInstance;
+try {
+  dbInstance = firebaseConfig.firestoreDatabaseId
+    ? initializeFirestore(app, firestoreSettings, firebaseConfig.firestoreDatabaseId)
+    : initializeFirestore(app, firestoreSettings);
+} catch {
+  // Already initialized (e.g. hot reload) — fall back to the existing instance.
+  dbInstance = firebaseConfig.firestoreDatabaseId
+    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
+}
+export const db = dbInstance;
+
+// Deep-remove undefined values as a second line of defence before writing to Firestore.
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((v) => stripUndefinedDeep(v)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined) continue;
+      out[k] = stripUndefinedDeep(v);
+    }
+    return out as T;
+  }
+  return value;
+}
 
 export const googleProvider = new GoogleAuthProvider();
 
@@ -73,6 +102,27 @@ export async function loadUserDataFromFirestore(userId: string): Promise<SystemD
   }
 }
 
+// Load the full user doc (systemData + updatedAt) for recency comparison
+export async function loadUserDocFromFirestore(
+  userId: string
+): Promise<{ systemData: SystemData | null; updatedAt?: string } | null> {
+  try {
+    const userDocRef = doc(db, "users", userId);
+    const docSnap = await getDoc(userDocRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        systemData: (data.systemData as SystemData) ?? null,
+        updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error loading user doc from Firestore:", error);
+    return null;
+  }
+}
+
 // Save User System Data to Firestore
 export async function saveUserDataToFirestore(
   userId: string,
@@ -85,7 +135,7 @@ export async function saveUserDataToFirestore(
       userId,
       email: userInfo?.email || "",
       displayName: userInfo?.displayName || "",
-      systemData: data,
+      systemData: stripUndefinedDeep(data),
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return true;
