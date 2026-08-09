@@ -733,6 +733,7 @@ export default function App() {
         <AddMedicalRecordModal
           profileId={activeProfile.id}
           profileName={activeProfile.name}
+          existingRecords={data.medicalRecords}
           onClose={() => setShowAddMedicalRecordModal(false)}
           onSave={handleSaveMedicalRecord}
         />

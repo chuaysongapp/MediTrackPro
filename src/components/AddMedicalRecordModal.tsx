@@ -21,10 +21,12 @@ import {
 } from "lucide-react";
 import { MedicalRecord, CustomLabItem } from "../types";
 import { extractTextFromPdfFile, renderPdfPagesToImages, parseLabTextWithRegex } from "../utils/labParser";
+import { sha256Hex, findDuplicateRecord } from "../utils/dedupe";
 
 interface AddMedicalRecordModalProps {
   profileId: string;
   profileName: string;
+  existingRecords?: MedicalRecord[];
   onClose: () => void;
   onSave: (record: Omit<MedicalRecord, "id">) => void;
 }
@@ -32,6 +34,7 @@ interface AddMedicalRecordModalProps {
 export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
   profileId,
   profileName,
+  existingRecords = [],
   onClose,
   onSave,
 }) => {
@@ -47,6 +50,8 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
   const [doctorNotes, setDoctorNotes] = useState<string>("");
   const [pdfFileName, setPdfFileName] = useState<string>("");
   const [isAiParsed, setIsAiParsed] = useState<boolean>(false);
+  const [fileHash, setFileHash] = useState<string>("");
+  const [duplicateOf, setDuplicateOf] = useState<MedicalRecord | null>(null);
 
   // Raw Text Inspection & Paste State
   const [rawTextContent, setRawTextContent] = useState<string>("");
@@ -163,6 +168,17 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     setIsUploading(true);
     setUploadError("");
     setUploadSuccess("");
+    setFileHash("");
+    setDuplicateOf(null);
+
+    // Compute SHA-256 of the raw file bytes (for exact-duplicate detection)
+    try {
+      const rawBuffer = await file.arrayBuffer();
+      const h = await sha256Hex(rawBuffer);
+      if (h) setFileHash(h);
+    } catch {
+      setFileHash("");
+    }
 
     // Reset all numeric lab fields to empty before parsing new document
     setFbs("");
@@ -274,40 +290,62 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
     }
   };
 
+  const buildRecord = (): Omit<MedicalRecord, "id"> => ({
+    profileId,
+    title: title.trim() || "ผลตรวจเลือดและเคมีคลินิก",
+    hospital: hospital.trim() || "โรงพยาบาล/คลินิก",
+    patientName: patientName.trim(),
+    date,
+    diagnosis: diagnosis.trim() || undefined,
+    doctorNotes: doctorNotes.trim() || undefined,
+    pdfFileName: pdfFileName || undefined,
+    isAiParsed,
+    fileHash: fileHash || undefined,
+    labResults: {
+      fbs: fbs ? Number(fbs) : undefined,
+      hba1c: hba1c ? Number(hba1c) : undefined,
+      cholesterol: cholesterol ? Number(cholesterol) : undefined,
+      triglyceride: triglyceride ? Number(triglyceride) : undefined,
+      hdl: hdl ? Number(hdl) : undefined,
+      ldl: ldl ? Number(ldl) : undefined,
+      creatinine: creatinine ? Number(creatinine) : undefined,
+      bun: bun ? Number(bun) : undefined,
+      egfr: egfr ? Number(egfr) : undefined,
+      sgot: sgot ? Number(sgot) : undefined,
+      sgpt: sgpt ? Number(sgpt) : undefined,
+      uricAcid: uricAcid ? Number(uricAcid) : undefined,
+      hemoglobin: hemoglobin ? Number(hemoglobin) : undefined,
+      wbc: wbc ? Number(wbc) : undefined,
+      platelet: platelet ? Number(platelet) : undefined,
+      customItems: customItems.filter((i) => i.testName.trim() !== ""),
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const record = buildRecord();
 
-    const record: Omit<MedicalRecord, "id"> = {
-      profileId,
-      title: title.trim() || "ผลตรวจเลือดและเคมีคลินิก",
-      hospital: hospital.trim() || "โรงพยาบาล/คลินิก",
-      patientName: patientName.trim(),
-      date,
-      diagnosis: diagnosis.trim() || undefined,
-      doctorNotes: doctorNotes.trim() || undefined,
-      pdfFileName: pdfFileName || undefined,
-      isAiParsed,
-      labResults: {
-        fbs: fbs ? Number(fbs) : undefined,
-        hba1c: hba1c ? Number(hba1c) : undefined,
-        cholesterol: cholesterol ? Number(cholesterol) : undefined,
-        triglyceride: triglyceride ? Number(triglyceride) : undefined,
-        hdl: hdl ? Number(hdl) : undefined,
-        ldl: ldl ? Number(ldl) : undefined,
-        creatinine: creatinine ? Number(creatinine) : undefined,
-        bun: bun ? Number(bun) : undefined,
-        egfr: egfr ? Number(egfr) : undefined,
-        sgot: sgot ? Number(sgot) : undefined,
-        sgpt: sgpt ? Number(sgpt) : undefined,
-        uricAcid: uricAcid ? Number(uricAcid) : undefined,
-        hemoglobin: hemoglobin ? Number(hemoglobin) : undefined,
-        wbc: wbc ? Number(wbc) : undefined,
-        platelet: platelet ? Number(platelet) : undefined,
-        customItems: customItems.filter((i) => i.testName.trim() !== ""),
-      },
-    };
+    // Duplicate check (scoped per profile). Warn but allow override.
+    const dup = findDuplicateRecord(existingRecords, {
+      profileId: record.profileId,
+      date: record.date,
+      hospital: record.hospital,
+      labResults: record.labResults,
+      fileHash: record.fileHash,
+      pdfFileName: record.pdfFileName,
+    });
+    if (dup) {
+      setDuplicateOf(dup);
+      return;
+    }
 
     onSave(record);
+  };
+
+  // ผู้ใช้ยืนยันบันทึกซ้ำอยู่ดี
+  const handleForceSave = () => {
+    setDuplicateOf(null);
+    onSave(buildRecord());
   };
 
   return (
@@ -876,6 +914,43 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
               />
             </div>
           </div>
+
+          {/* Duplicate Warning */}
+          {duplicateOf && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-amber-900">ดูเหมือนผลตรวจนี้เคยบันทึกไว้แล้ว</p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    ตรงกับรายการเดิม: <span className="font-semibold">{duplicateOf.title}</span>
+                    {" · "}{duplicateOf.hospital}
+                    {" · "}วันที่ {duplicateOf.date}
+                    {duplicateOf.fileHash && fileHash && duplicateOf.fileHash === fileHash
+                      ? " (ไฟล์เดียวกันเป๊ะ)"
+                      : " (ค่าผลตรวจตรงกัน)"}
+                  </p>
+                  <p className="text-xs text-amber-700 mt-1">ต้องการบันทึกซ้ำอีกครั้งหรือไม่?</p>
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={handleForceSave}
+                      className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      บันทึกซ้ำอยู่ดี
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDuplicateOf(null)}
+                      className="px-4 py-2 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-100 font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Submit Buttons */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">

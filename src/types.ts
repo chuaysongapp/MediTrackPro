@@ -94,6 +94,8 @@ export interface MedicalRecord {
   doctorNotes?: string; // บันทึกของแพทย์
   pdfFileName?: string;
   isAiParsed?: boolean;
+  fileHash?: string; // SHA-256 ของไฟล์ที่อัปโหลด (ใช้ตรวจไฟล์ซ้ำแบบเป๊ะ)
+  contentHash?: string; // ลายเซ็นเนื้อหา (วันที่+รพ.+ค่าแล็บ) เผื่อใช้ในอนาคต
   labResults?: {
     fbs?: number; // Fasting Blood Sugar (mg/dL)
     hba1c?: number; // %
