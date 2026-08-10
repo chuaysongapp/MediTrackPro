@@ -33,6 +33,19 @@ import { AppLockGate } from "./components/AppLockGate";
 import { PinSettingsCard } from "./components/PinSettingsCard";
 import { lockEnabled } from "./utils/appLock";
 
+// Whether a SystemData snapshot contains real user data (used to decide cloud-vs-local
+// on load, so an empty/fresh device never overwrites a cloud copy that has records).
+function hasMeaningfulData(s?: SystemData | null): boolean {
+  if (!s) return false;
+  return (
+    (s.medicalRecords?.length || 0) > 0 ||
+    (s.medicines?.length || 0) > 0 ||
+    (s.vitals?.length || 0) > 0 ||
+    (s.appointments?.length || 0) > 0 ||
+    (s.refillHistory?.length || 0) > 0
+  );
+}
+
 export default function App() {
   const [data, setData] = useState<SystemData>(() => loadInitialData());
   const [activeTab, setActiveTab] = useState<string>("dashboard");
@@ -63,17 +76,31 @@ export default function App() {
         const localTs = getLocalUpdatedAt();
 
         const cloudHasData = !!(cloudData && cloudData.profiles && cloudData.profiles.length > 0);
+        const cloudMeaningful = hasMeaningfulData(cloudData);
+        const localMeaningful = hasMeaningfulData(data);
         // Local counts as "newer" only if we actually have a local timestamp AND
         // it is strictly newer than the cloud copy (ISO strings compare correctly).
         const localIsNewer = !!(localTs && cloudTs && localTs > cloudTs);
 
-        if (cloudHasData && !localIsNewer) {
-          // Cloud is the source of truth (same or newer than local)
+        // Decide the source of truth by ACTUAL data, not just timestamps. This prevents
+        // a freshly-opened device (empty local, but written with a new timestamp on load)
+        // from overwriting a cloud copy that already has real records.
+        let pushLocal: boolean;
+        if (!cloudHasData) {
+          pushLocal = true; // cloud is empty → seed it from local
+        } else if (localMeaningful && !cloudMeaningful) {
+          pushLocal = true; // local has real data, cloud doesn't → restore cloud
+        } else if (localMeaningful && cloudMeaningful && localIsNewer) {
+          pushLocal = true; // both have data, local is a genuinely newer unsynced change
+        } else {
+          pushLocal = false; // otherwise cloud wins (covers fresh/empty local devices)
+        }
+
+        if (!pushLocal) {
+          // Cloud is the source of truth
           setData(cloudData as SystemData);
           setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
         } else {
-          // Either the cloud is empty, or our local data is newer (e.g. a record was
-          // just added and the debounced cloud save hadn't finished before reload).
           // Push local up instead of letting a stale/empty cloud wipe it.
           await saveUserDataToFirestore(user.uid, data, {
             email: user.email,

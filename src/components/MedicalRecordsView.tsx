@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Stethoscope,
   Calendar,
@@ -14,6 +14,8 @@ import {
   FileCheck,
   ShieldCheck,
   User,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { DoctorAppointment, MedicalRecord, UserProfile } from "../types";
 import { formatThaiDate } from "../utils/thaiHelpers";
@@ -38,7 +40,15 @@ export const MedicalRecordsView: React.FC<MedicalRecordsViewProps> = ({
   onToggleApptStatus,
 }) => {
   const profileAppts = appointments.filter((a) => a.profileId === activeProfile.id);
-  const profileRecords = medicalRecords.filter((r) => r.profileId === activeProfile.id);
+  const profileRecords = medicalRecords
+    .filter((r) => r.profileId === activeProfile.id)
+    // Sort by test date, newest first (dates are YYYY-MM-DD so string compare is correct)
+    .slice()
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  // Collapsible cards — all collapsed by default
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const upcomingAppts = profileAppts.filter((a) => a.status === "upcoming");
 
@@ -174,7 +184,9 @@ export const MedicalRecordsView: React.FC<MedicalRecordsViewProps> = ({
           </div>
         ) : (
           <div className="space-y-4">
-            {profileRecords.map((rec) => (
+            {profileRecords.map((rec) => {
+              const isOpen = !!expanded[rec.id];
+              return (
               <div
                 key={rec.id}
                 className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4 relative"
@@ -211,6 +223,14 @@ export const MedicalRecordsView: React.FC<MedicalRecordsViewProps> = ({
                       </span>
                     )}
                     <button
+                      onClick={() => toggle(rec.id)}
+                      className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer"
+                      title={isOpen ? "ย่อรายการ" : "ขยายรายการ"}
+                      aria-expanded={isOpen}
+                    >
+                      {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                    <button
                       onClick={() => {
                         if (confirm(`คุณต้องการลบรายการ "${rec.title}" ใช่หรือไม่?`)) {
                           onDeleteMedicalRecord(rec.id);
@@ -224,6 +244,32 @@ export const MedicalRecordsView: React.FC<MedicalRecordsViewProps> = ({
                   </div>
                 </div>
 
+                {/* Collapsed summary — quick glance of key values */}
+                {!isOpen && (
+                  <button
+                    onClick={() => toggle(rec.id)}
+                    className="w-full flex items-center justify-between gap-2 text-left cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {rec.labResults?.fbs !== undefined && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">FBS {rec.labResults.fbs}</span>
+                      )}
+                      {rec.labResults?.hba1c !== undefined && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">HbA1c {rec.labResults.hba1c}%</span>
+                      )}
+                      {rec.labResults?.ldl !== undefined && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">LDL {rec.labResults.ldl}</span>
+                      )}
+                      {rec.labResults?.egfr !== undefined && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">eGFR {rec.labResults.egfr}</span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-emerald-700 font-bold shrink-0 group-hover:underline">แตะเพื่อดูทั้งหมด</span>
+                  </button>
+                )}
+
+                {isOpen && (
+                <>
                 {rec.diagnosis && (
                   <div className="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-100 text-xs text-emerald-950">
                     <strong className="text-emerald-800">คำวินิจฉัยแพทย์:</strong> {rec.diagnosis}
@@ -352,8 +398,11 @@ export const MedicalRecordsView: React.FC<MedicalRecordsViewProps> = ({
                     )}
                   </div>
                 )}
+                </>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
