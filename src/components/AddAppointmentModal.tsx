@@ -1,6 +1,8 @@
-import React, { useState } from "react";
-import { Stethoscope, X, Calendar, Clock, Building, FileText, Save } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { Stethoscope, X, Calendar, Clock, Building, FileText, Save, Upload, Sparkles, ClipboardPaste } from "lucide-react";
 import { DoctorAppointment } from "../types";
+import { extractTextFromPdfFile } from "../utils/labParser";
+import { parseAppointmentText } from "../utils/appointmentParser";
 
 interface AddAppointmentModalProps {
   profileId: string;
@@ -20,6 +22,55 @@ export const AddAppointmentModal: React.FC<AddAppointmentModalProps> = ({
   const [appointmentTime, setAppointmentTime] = useState("09:00");
   const [purpose, setPurpose] = useState("");
   const [preparationNotes, setPreparationNotes] = useState("");
+
+  // PDF/image auto-fill
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [parseMsg, setParseMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+
+  const applyParsed = (text: string): boolean => {
+    const p = parseAppointmentText(text);
+    const got: string[] = [];
+    if (p.doctorName) { setDoctorName(p.doctorName); got.push("แพทย์"); }
+    if (p.hospital) { setHospital(p.hospital); got.push("โรงพยาบาล"); }
+    if (p.department) { setDepartment(p.department); got.push("แผนก"); }
+    if (p.appointmentDate) { setAppointmentDate(p.appointmentDate); got.push("วันนัด"); }
+    if (p.appointmentTime) { setAppointmentTime(p.appointmentTime); got.push("เวลา"); }
+    if (p.purpose) { setPurpose(p.purpose); got.push("วัตถุประสงค์"); }
+    if (got.length === 0) {
+      setParseMsg({ ok: false, text: "อ่านข้อมูลไม่พบ ลองวางข้อความเอง หรือกรอกด้านล่าง" });
+      return false;
+    }
+    setParseMsg({ ok: true, text: `ดึงข้อมูลแล้ว: ${got.join(", ")} — ตรวจทานก่อนบันทึก` });
+    return true;
+  };
+
+  const handleFile = async (file: File) => {
+    setParsing(true);
+    setParseMsg(null);
+    try {
+      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+      if (isPdf) {
+        const text = await extractTextFromPdfFile(file);
+        if (!text) {
+          setParseMsg({ ok: false, text: "อ่าน PDF ไม่ได้ (อาจเป็นไฟล์สแกนเป็นรูป) — ลองวางข้อความเอง" });
+          setShowPaste(true);
+        } else {
+          applyParsed(text);
+        }
+      } else {
+        // Image has no text layer to read on-device — offer paste instead
+        setParseMsg({ ok: false, text: "รูปภาพยังอ่านอัตโนมัติไม่ได้ (ไม่มีข้อความในไฟล์) — พิมพ์/วางข้อความจากใบนัดด้านล่าง" });
+        setShowPaste(true);
+      }
+    } catch {
+      setParseMsg({ ok: false, text: "เกิดข้อผิดพลาดในการอ่านไฟล์" });
+    } finally {
+      setParsing(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +109,67 @@ export const AddAppointmentModal: React.FC<AddAppointmentModalProps> = ({
               แจ้งเตือนการนัดหมาย ฟังผลตรวจ และคำแนะนำเตรียมตัวก่อนพบแพทย์
             </p>
           </div>
+        </div>
+
+        {/* Auto-fill from PDF / image / pasted text */}
+        <div className="mb-5 rounded-2xl border border-teal-200 bg-teal-50/60 p-4">
+          <p className="text-xs font-bold text-teal-900 flex items-center gap-1.5 mb-2">
+            <Sparkles className="w-4 h-4 text-teal-600" /> ดึงข้อมูลจากใบนัดอัตโนมัติ
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.currentTarget.value = "";
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={parsing}
+              className="px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <Upload className="w-4 h-4" /> {parsing ? "กำลังอ่าน..." : "อัปโหลด PDF / รูป"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPaste((v) => !v)}
+              className="px-3.5 py-2 rounded-xl border border-teal-300 text-teal-800 hover:bg-teal-100 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <ClipboardPaste className="w-4 h-4" /> วางข้อความจากใบนัด
+            </button>
+          </div>
+
+          {showPaste && (
+            <div className="mt-3">
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={4}
+                placeholder={"วางข้อความจากใบนัด เช่น\nนพ.รัชพล มาลา\nรพ.วลัยลักษณ์ (คลินิกหู คอ จมูก)\nวันนัด: 11 ส.ค. 2569 เวลา 11:45 น.\nวัตถุประสงค์: ฟังผล PSG"}
+                className="w-full rounded-xl border border-teal-300 px-3 py-2 text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => applyParsed(pasteText)}
+                disabled={!pasteText.trim()}
+                className="mt-2 px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white font-bold text-xs cursor-pointer transition-colors"
+              >
+                ดึงข้อมูลจากข้อความ
+              </button>
+            </div>
+          )}
+
+          {parseMsg && (
+            <p className={`text-xs font-semibold mt-2 ${parseMsg.ok ? "text-emerald-700" : "text-amber-700"}`}>
+              {parseMsg.text}
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
