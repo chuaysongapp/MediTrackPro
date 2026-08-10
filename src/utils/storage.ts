@@ -34,9 +34,19 @@ export function loadSystemData(): SystemData {
 export function saveSystemData(data: SystemData): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    localStorage.setItem(LOCAL_UPDATED_AT_KEY, new Date().toISOString());
   } catch (e) {
     console.error("Error saving system data to localStorage:", e);
+  }
+}
+
+// Stamp the "locally modified" time. Call this ONLY on genuine user edits — never on
+// initial load/hydration or when data was just pulled from the cloud — so that opening
+// the app on a device never makes its (possibly older) local copy look "newer" than cloud.
+export function markLocalModified(): void {
+  try {
+    localStorage.setItem(LOCAL_UPDATED_AT_KEY, new Date().toISOString());
+  } catch (e) {
+    console.error("Error marking local modified time:", e);
   }
 }
 

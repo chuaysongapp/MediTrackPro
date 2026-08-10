@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { User, onAuthStateChanged } from "firebase/auth";
 import { SystemData, UserProfile, Medicine, MealTime, FoodRelation, HealthVital, DoctorAppointment, LineConfig, MedicalRecord } from "./types";
-import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData, getLocalUpdatedAt } from "./utils/storage";
+import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData, getLocalUpdatedAt, markLocalModified } from "./utils/storage";
 import {
   auth,
   loginWithGoogle,
@@ -31,6 +31,7 @@ import { PwaInstallModal } from "./components/PwaInstallModal";
 import { AddMedicalRecordModal } from "./components/AddMedicalRecordModal";
 import { AppLockGate } from "./components/AppLockGate";
 import { PinSettingsCard } from "./components/PinSettingsCard";
+import { CloudSyncCard } from "./components/CloudSyncCard";
 import { lockEnabled } from "./utils/appLock";
 
 // Whether a SystemData snapshot contains real user data (used to decide cloud-vs-local
@@ -48,6 +49,9 @@ function hasMeaningfulData(s?: SystemData | null): boolean {
 
 export default function App() {
   const [data, setData] = useState<SystemData>(() => loadInitialData());
+  // Refs to distinguish genuine user edits from load/cloud-driven data changes
+  const firstDataRun = useRef(true);
+  const skipNextTouch = useRef(false);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [theme, setTheme] = useState<UITheme>(() => {
@@ -98,6 +102,7 @@ export default function App() {
 
         if (!pushLocal) {
           // Cloud is the source of truth
+          skipNextTouch.current = true;
           setData(cloudData as SystemData);
           setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
         } else {
@@ -212,6 +217,33 @@ export default function App() {
   // App lock: start locked whenever a PIN has been configured (locks on every open/refresh)
   const [locked, setLocked] = useState<boolean>(() => lockEnabled());
 
+  const handleForcePushCloud = async (): Promise<{ ok: boolean; msg: string }> => {
+    if (!firebaseUser) return { ok: false, msg: "ยังไม่ได้ล็อกอิน — กรุณาล็อกอิน Google ก่อน" };
+    const success = await saveUserDataToFirestore(firebaseUser.uid, data, {
+      email: firebaseUser.email,
+      displayName: firebaseUser.displayName,
+    });
+    if (success) {
+      setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
+      const n = data.medicalRecords?.length || 0;
+      return { ok: true, msg: `ดันข้อมูลขึ้นคลาวด์แล้ว (ผลตรวจ ${n} รายการ)` };
+    }
+    return { ok: false, msg: "ดันขึ้นคลาวด์ไม่สำเร็จ ลองใหม่อีกครั้ง" };
+  };
+
+  const handleForcePullCloud = async (): Promise<{ ok: boolean; msg: string }> => {
+    if (!firebaseUser) return { ok: false, msg: "ยังไม่ได้ล็อกอิน — กรุณาล็อกอิน Google ก่อน" };
+    const cloudDoc = await loadUserDocFromFirestore(firebaseUser.uid);
+    const cloudData = cloudDoc?.systemData;
+    if (!cloudData) return { ok: false, msg: "ไม่พบข้อมูลบนคลาวด์" };
+    skipNextTouch.current = true; // pulling from cloud must not stamp local as modified
+    setData(cloudData);
+    saveData(cloudData);
+    setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
+    const n = cloudData.medicalRecords?.length || 0;
+    return { ok: true, msg: `ดึงข้อมูลจากคลาวด์แล้ว (ผลตรวจ ${n} รายการ)` };
+  };
+
   const handleSaveMedicalRecord = (record: Omit<MedicalRecord, "id">) => {
     const newRecord: MedicalRecord = {
       ...record,
@@ -233,7 +265,16 @@ export default function App() {
 
   // Sync to local storage on data change
   useEffect(() => {
-    saveData(data);
+    saveData(data); // always persist content locally
+    if (firstDataRun.current) {
+      firstDataRun.current = false; // initial hydration — do not stamp modified time
+      return;
+    }
+    if (skipNextTouch.current) {
+      skipNextTouch.current = false; // this change came from a cloud load/pull — do not stamp
+      return;
+    }
+    markLocalModified(); // genuine local edit
   }, [data]);
 
   // Network Online/Offline listener
@@ -695,7 +736,14 @@ export default function App() {
           />
         )}
         {activeTab === "settings" && (
-          <div className="mt-4">
+          <div className="mt-4 space-y-4">
+            <CloudSyncCard
+              email={firebaseUser?.email}
+              lastSavedAt={lastSavedAt}
+              recordCount={data.medicalRecords.length}
+              onPush={handleForcePushCloud}
+              onPull={handleForcePullCloud}
+            />
             <PinSettingsCard profileName={activeProfile?.name} />
           </div>
         )}
