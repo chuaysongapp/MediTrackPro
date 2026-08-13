@@ -54,15 +54,14 @@ export const AddAppointmentModal: React.FC<AddAppointmentModalProps> = ({
       const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
       if (isPdf) {
         const text = await extractTextFromPdfFile(file);
-        if (!text) {
-          setParseMsg({ ok: false, text: "อ่าน PDF ไม่ได้ (อาจเป็นไฟล์สแกนเป็นรูป) — ลองวางข้อความเอง" });
+        if (!text || text.trim().length < 20) {
+          setParseMsg({ ok: false, text: "PDF นี้ไม่มีข้อความ (เป็นไฟล์สแกน/รูป) — กรุณาวางข้อความจากใบนัดด้านล่างแทน" });
           setShowPaste(true);
         } else {
           applyParsed(text);
         }
       } else {
-        // Image has no text layer to read on-device — offer paste instead
-        setParseMsg({ ok: false, text: "รูปภาพยังอ่านอัตโนมัติไม่ได้ (ไม่มีข้อความในไฟล์) — พิมพ์/วางข้อความจากใบนัดด้านล่าง" });
+        setParseMsg({ ok: false, text: "📷 รูปภาพไม่มีข้อความให้อ่าน (ต้องใช้ OCR ที่ยังไม่รองรับ) — กรุณาพิมพ์/วางข้อความจากใบนัดด้านล่าง" });
         setShowPaste(true);
       }
     } catch {

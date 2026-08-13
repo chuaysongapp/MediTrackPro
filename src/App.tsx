@@ -208,6 +208,7 @@ export default function App() {
   const [editMed, setEditMed] = useState<Medicine | null>(null);
   const [showAddMedModal, setShowAddMedModal] = useState<boolean>(false);
   const [showAddVitalsModal, setShowAddVitalsModal] = useState<boolean>(false);
+  const [editVital, setEditVital] = useState<HealthVital | null>(null);
   const [showAddApptModal, setShowAddApptModal] = useState<boolean>(false);
   const [showAddProfileModal, setShowAddProfileModal] = useState<boolean>(false);
   const [editingProfile, setEditingProfile] = useState<UserProfile | null>(null);
@@ -454,17 +455,25 @@ export default function App() {
 
   // Add Health Vital Reading
   const handleSaveVitals = (vitalData: Omit<HealthVital, "id">) => {
-    const newVital: HealthVital = {
-      ...vitalData,
-      id: `vital_${Date.now()}`,
-    };
-
-    setData((prev) => ({
-      ...prev,
-      vitals: [newVital, ...prev.vitals],
-    }));
-
+    if (editVital) {
+      setData((prev) => ({
+        ...prev,
+        vitals: prev.vitals.map((v) =>
+          v.id === editVital.id ? { ...vitalData, id: editVital.id } : v
+        ),
+      }));
+      setEditVital(null);
+    } else {
+      const newVital: HealthVital = { ...vitalData, id: `vital_${Date.now()}` };
+      setData((prev) => ({ ...prev, vitals: [newVital, ...prev.vitals] }));
+    }
     setShowAddVitalsModal(false);
+  };
+
+  const handleDeleteVital = (vitalId: string) => {
+    if (confirm("ลบค่าสัญญาณชีพรายการนี้?")) {
+      setData((prev) => ({ ...prev, vitals: prev.vitals.filter((v) => v.id !== vitalId) }));
+    }
   };
 
   // Add Doctor Appointment
@@ -658,6 +667,8 @@ export default function App() {
             lineConfig={data.lineConfig}
             onToggleIntake={handleToggleIntake}
             onOpenAddVitals={() => setShowAddVitalsModal(true)}
+            onEditVital={(v) => { setEditVital(v); setShowAddVitalsModal(true); }}
+            onDeleteVital={handleDeleteVital}
             onOpenRefill={(med) => setRefillMed(med)}
             onNavigateTab={(tab) => setActiveTab(tab)}
             onSendLineNotify={handleSendTestLineMessage}
@@ -781,7 +792,8 @@ export default function App() {
       {showAddVitalsModal && (
         <AddVitalsModal
           profileId={activeProfile.id}
-          onClose={() => setShowAddVitalsModal(false)}
+          vitalToEdit={editVital}
+          onClose={() => { setShowAddVitalsModal(false); setEditVital(null); }}
           onSave={handleSaveVitals}
         />
       )}

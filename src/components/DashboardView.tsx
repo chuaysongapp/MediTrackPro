@@ -46,6 +46,8 @@ interface DashboardViewProps {
   lineConfig: LineConfig;
   onToggleIntake: (medicineId: string, meal: MealTime, status: "taken" | "skipped") => void;
   onOpenAddVitals: () => void;
+  onEditVital?: (v: HealthVital) => void;
+  onDeleteVital?: (id: string) => void;
   onOpenRefill: (med: Medicine) => void;
   onNavigateTab: (tab: string) => void;
   onSendLineNotify: (msg: string) => void;
@@ -62,6 +64,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   lineConfig,
   onToggleIntake,
   onOpenAddVitals,
+  onEditVital,
+  onDeleteVital,
   onOpenRefill,
   onNavigateTab,
   onSendLineNotify,
@@ -425,7 +429,21 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
 
             {latestVital ? (
               <div className="space-y-2.5">
-                {/* Blood Pressure Card */}
+                {/* Edit / Delete controls */}
+                <div className="flex items-center justify-end gap-2">
+                  {onEditVital && (
+                    <button
+                      onClick={() => onEditVital(latestVital)}
+                      className="text-[10px] font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                    >✏️ แก้ไข</button>
+                  )}
+                  {onDeleteVital && (
+                    <button
+                      onClick={() => onDeleteVital(latestVital.id)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-red-600 flex items-center gap-1 cursor-pointer"
+                    >🗑 ลบ</button>
+                  )}
+                </div>
                 <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex justify-between">
                     <span>ความดันโลหิต</span>

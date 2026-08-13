@@ -144,8 +144,8 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   setTotalQuantity(v);
-                  // Keep remainingQuantity ≤ totalQuantity automatically
-                  if (remainingQuantity > v) setRemainingQuantity(v);
+                  // Only auto-adjust remaining if it exceeds total AND both are non-zero
+                  if (v > 0 && remainingQuantity > v) setRemainingQuantity(v);
                 }}
                 className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 font-bold text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />

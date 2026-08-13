@@ -128,7 +128,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredMeds.map((med) => {
             const isLowStock = med.remainingQuantity <= med.lowThreshold;
-            const stockPct = Math.min(100, Math.round((med.remainingQuantity / (med.totalQuantity || 60)) * 100));
+            const stockPct = Math.min(100, Math.round((med.remainingQuantity / Math.max(med.totalQuantity || 60, med.remainingQuantity, 1)) * 100));
 
             return (
               <div
@@ -186,8 +186,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <div className="flex justify-between text-xs font-bold">
                       <span className="text-slate-500">จำนวนคงเหลือ:</span>
                       <span className={isLowStock ? "text-orange-600 font-bold" : "text-blue-700 font-bold"}>
-                        {med.remainingQuantity} / {med.totalQuantity || 60} {med.unit}
+                        {med.remainingQuantity} {med.unit}
                       </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      เติมยาครั้งละ {med.totalQuantity || 60} {med.unit} · เตือนเมื่อเหลือ {med.lowThreshold} {med.unit}
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div

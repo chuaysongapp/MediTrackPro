@@ -4,23 +4,25 @@ import { HealthVital } from "../types";
 
 interface AddVitalsModalProps {
   profileId: string;
+  vitalToEdit?: HealthVital | null;
   onClose: () => void;
   onSave: (vital: Omit<HealthVital, "id">) => void;
 }
 
 export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
   profileId,
+  vitalToEdit,
   onClose,
   onSave,
 }) => {
-  const [systolicBP, setSystolicBP] = useState<string>("120");
-  const [diastolicBP, setDiastolicBP] = useState<string>("80");
-  const [heartRate, setHeartRate] = useState<string>("72");
-  const [bloodSugar, setBloodSugar] = useState<string>("100");
-  const [sugarType, setSugarType] = useState<"fasting" | "after_meal" | "random">("fasting");
-  const [weight, setWeight] = useState<string>("68.0");
-  const [height, setHeight] = useState<string>("168");
-  const [note, setNote] = useState<string>("");
+  const [systolicBP, setSystolicBP] = useState<string>(String(vitalToEdit?.systolicBP ?? "120"));
+  const [diastolicBP, setDiastolicBP] = useState<string>(String(vitalToEdit?.diastolicBP ?? "80"));
+  const [heartRate, setHeartRate] = useState<string>(String(vitalToEdit?.heartRate ?? "72"));
+  const [bloodSugar, setBloodSugar] = useState<string>(String(vitalToEdit?.bloodSugar ?? "100"));
+  const [sugarType, setSugarType] = useState<"fasting" | "after_meal" | "random">(vitalToEdit?.sugarType ?? "fasting");
+  const [weight, setWeight] = useState<string>(String(vitalToEdit?.weight ?? "68.0"));
+  const [height, setHeight] = useState<string>(String(vitalToEdit?.height ?? "168"));
+  const [note, setNote] = useState<string>(vitalToEdit?.note ?? "");
 
   // Bluetooth scanning state
   const [isBtConnecting, setIsBtConnecting] = useState<boolean>(false);
@@ -94,28 +96,60 @@ export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
         }
 
         if (device) {
-          const devName = device.name || `เครื่องวัดบลูทูธ (${device.id.slice(0, 5)})`;
-          setBtStatus(`เชื่อมต่อสำเร็จกับ: ${devName}`);
+          const devName = device.name || `อุปกรณ์ BT (${(device.id || "").slice(0, 8)})`;
+          setBtStatus(`พบอุปกรณ์: ${devName} — กำลังเชื่อมต่อ GATT...`);
           setConnectedDevice(devName);
 
-          // Connect GATT
+          // Connect GATT and read real characteristic values
           try {
             const server = await device.gatt?.connect();
             if (server) {
-              setBtStatus(`ดึงข้อมูลค่าสุขภาพเรียบร้อยแล้วจาก ${devName}`);
+              let gotData = false;
+
               if (deviceType === "bp") {
-                setSystolicBP("122");
-                setDiastolicBP("78");
-                setHeartRate("74");
+                try {
+                  const svc = await server.getPrimaryService(0x1810); // Blood Pressure service
+                  const char = await svc.getCharacteristic(0x2a35); // Blood Pressure Measurement
+                  const val = await char.readValue();
+                  // BPM format: flags(1) + systolic(2) + diastolic(2) + MAP(2) + pulse(2) - little endian mmHg
+                  const systolic = val.getUint16(1, true);
+                  const diastolic = val.getUint16(3, true);
+                  const pulse = val.byteLength >= 8 ? val.getUint16(7, true) : 0;
+                  if (systolic > 50 && systolic < 250) {
+                    setSystolicBP(String(systolic));
+                    setDiastolicBP(String(diastolic));
+                    if (pulse > 30) setHeartRate(String(pulse));
+                    gotData = true;
+                  }
+                } catch { /* characteristic not available on this device */ }
               } else if (deviceType === "sugar") {
-                setBloodSugar("102");
+                try {
+                  const svc = await server.getPrimaryService(0x1808); // Glucose service
+                  const char = await svc.getCharacteristic(0x2a18); // Glucose Measurement
+                  const val = await char.readValue();
+                  // Glucose Measurement: flags(1) + seq(2) + date(7) + timeOffset(2) + glucoseConc(2)
+                  const rawGlucose = val.getFloat32(10, true); // mol/L × 1000 = mmol/L
+                  const mgdl = Math.round(rawGlucose * 18000); // convert mol/L → mg/dL
+                  if (mgdl > 20 && mgdl < 600) { setBloodSugar(String(mgdl)); gotData = true; }
+                } catch { /* characteristic not available */ }
               } else if (deviceType === "scale") {
-                setWeight("67.8");
+                try {
+                  const svc = await server.getPrimaryService(0x181d); // Weight Scale
+                  const char = await svc.getCharacteristic(0x2a9d); // Weight Measurement
+                  const val = await char.readValue();
+                  const rawWeight = val.getUint16(1, true) * 0.005; // resolution 0.005 kg
+                  if (rawWeight > 5 && rawWeight < 300) { setWeight(rawWeight.toFixed(1)); gotData = true; }
+                } catch { /* characteristic not available */ }
+              }
+
+              if (gotData) {
+                setBtStatus(`✅ ดึงข้อมูลจาก ${devName} สำเร็จ — ตรวจสอบค่าก่อนบันทึก`);
+              } else {
+                setBtStatus(`⚠️ เชื่อมต่อ ${devName} ได้ แต่ไม่พบข้อมูลสุขภาพ — อุปกรณ์อาจไม่ใช่เครื่องวัดสุขภาพ หรือไม่รองรับ BLE Health Profile`);
               }
             }
-          } catch (gattErr) {
-            console.log("GATT connect notice:", gattErr);
-            setBtStatus(`เชื่อมต่ออุปกรณ์ ${devName} แล้ว (รับส่งสัญญาณเรียบร้อย)`);
+          } catch (gattErr: any) {
+            setBtStatus(`⚠️ เชื่อมต่อ ${devName} แต่ดึงข้อมูลไม่ได้ — กรอกค่าเองด้านล่าง (${gattErr?.message || "GATT error"})`);
           }
         }
       } else {
