@@ -397,24 +397,21 @@ export default function App() {
         return m;
       });
 
-      const updatedRefills = [
-        ...prev.refillLogs,
-        {
-          id: `refill_${Date.now()}`,
-          profileId: activeProfile.id,
-          medicineId,
-          date: todayStr,
-          addedQuantity: addQty,
-          cost,
-          source,
-          note,
-        },
-      ];
+      const newRefillEntry = {
+        id: `refill_${Date.now()}`,
+        profileId: activeProfile.id,
+        medicineId,
+        date: todayStr,
+        addedQuantity: addQty,
+        cost,
+        source,
+        note,
+      };
 
       return {
         ...prev,
         medicines: updatedMeds,
-        refillLogs: updatedRefills,
+        refillHistory: [...(prev.refillHistory || []), newRefillEntry],
       };
     });
 

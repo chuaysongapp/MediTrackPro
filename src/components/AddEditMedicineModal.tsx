@@ -131,7 +131,26 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                จำนวนต่อครั้งที่รับ *
+              </label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={totalQuantity}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setTotalQuantity(v);
+                  // Keep remainingQuantity ≤ totalQuantity automatically
+                  if (remainingQuantity > v) setRemainingQuantity(v);
+                }}
+                className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 font-bold text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">จำนวนที่รับมาต่อรอบ เช่น 60 เม็ด</p>
+            </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 คงเหลือปัจจุบัน *
@@ -141,10 +160,18 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
                 min="0"
                 required
                 value={remainingQuantity}
-                onChange={(e) => setRemainingQuantity(Number(e.target.value))}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setRemainingQuantity(v);
+                  // totalQuantity must be ≥ remaining
+                  if (v > totalQuantity) setTotalQuantity(v);
+                }}
                 className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
+              <p className="text-[10px] text-slate-400 mt-1">นับจากที่เหลือจริงในกล่อง</p>
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 เตือนใกล้หมด *

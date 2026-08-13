@@ -23,6 +23,7 @@ export function loadSystemData(): SystemData {
       vitals: parsed.vitals || [],
       appointments: parsed.appointments || [],
       medicalRecords: parsed.medicalRecords || [],
+      refillHistory: parsed.refillHistory || (parsed as any).refillLogs || [],
       lineConfig: { ...initialSystemData.lineConfig, ...(parsed.lineConfig || {}) },
     };
   } catch (e) {
