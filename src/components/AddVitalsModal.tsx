@@ -108,38 +108,69 @@ export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
 
               if (deviceType === "bp") {
                 try {
-                  const svc = await server.getPrimaryService(0x1810); // Blood Pressure service
-                  const char = await svc.getCharacteristic(0x2a35); // Blood Pressure Measurement
-                  const val = await char.readValue();
-                  // BPM format: flags(1) + systolic(2) + diastolic(2) + MAP(2) + pulse(2) - little endian mmHg
-                  const systolic = val.getUint16(1, true);
-                  const diastolic = val.getUint16(3, true);
-                  const pulse = val.byteLength >= 8 ? val.getUint16(7, true) : 0;
-                  if (systolic > 50 && systolic < 250) {
-                    setSystolicBP(String(systolic));
-                    setDiastolicBP(String(diastolic));
-                    if (pulse > 30) setHeartRate(String(pulse));
-                    gotData = true;
-                  }
-                } catch { /* characteristic not available on this device */ }
+                  const svc = await server.getPrimaryService(0x1810);
+                  const char = await svc.getCharacteristic(0x2a35);
+                  // Blood Pressure uses INDICATE — must use startNotifications, not readValue
+                  await char.startNotifications();
+                  await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error("timeout")), 8000);
+                    char.addEventListener("characteristicvaluechanged", (event: any) => {
+                      clearTimeout(timeout);
+                      const val = event.target.value as DataView;
+                      const flags = val.getUint8(0);
+                      // bit 0 = unit (0=mmHg, 1=kPa)
+                      const systolic = val.getUint16(1, true);
+                      const diastolic = val.getUint16(3, true);
+                      const pulse = val.byteLength >= 10 ? val.getUint16(8, true) : 0;
+                      if (systolic > 50 && systolic < 250) {
+                        setSystolicBP(String(systolic));
+                        setDiastolicBP(String(diastolic));
+                        if (pulse > 30) setHeartRate(String(pulse));
+                        gotData = true;
+                      }
+                      resolve();
+                    });
+                  });
+                  await char.stopNotifications();
+                } catch (e: any) {
+                  console.warn("BP characteristic:", e?.message);
+                }
               } else if (deviceType === "sugar") {
                 try {
-                  const svc = await server.getPrimaryService(0x1808); // Glucose service
-                  const char = await svc.getCharacteristic(0x2a18); // Glucose Measurement
-                  const val = await char.readValue();
-                  // Glucose Measurement: flags(1) + seq(2) + date(7) + timeOffset(2) + glucoseConc(2)
-                  const rawGlucose = val.getFloat32(10, true); // mol/L × 1000 = mmol/L
-                  const mgdl = Math.round(rawGlucose * 18000); // convert mol/L → mg/dL
-                  if (mgdl > 20 && mgdl < 600) { setBloodSugar(String(mgdl)); gotData = true; }
-                } catch { /* characteristic not available */ }
+                  const svc = await server.getPrimaryService(0x1808);
+                  const char = await svc.getCharacteristic(0x2a18);
+                  await char.startNotifications();
+                  await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error("timeout")), 8000);
+                    char.addEventListener("characteristicvaluechanged", (event: any) => {
+                      clearTimeout(timeout);
+                      const val = event.target.value as DataView;
+                      // offset 10 = glucose concentration as SFLOAT (mol/L)
+                      const rawGlucose = val.getFloat32(10, true);
+                      const mgdl = Math.round(rawGlucose * 18000);
+                      if (mgdl > 20 && mgdl < 600) { setBloodSugar(String(mgdl)); gotData = true; }
+                      resolve();
+                    });
+                  });
+                  await char.stopNotifications();
+                } catch (e: any) { console.warn("Sugar characteristic:", e?.message); }
               } else if (deviceType === "scale") {
                 try {
-                  const svc = await server.getPrimaryService(0x181d); // Weight Scale
-                  const char = await svc.getCharacteristic(0x2a9d); // Weight Measurement
-                  const val = await char.readValue();
-                  const rawWeight = val.getUint16(1, true) * 0.005; // resolution 0.005 kg
-                  if (rawWeight > 5 && rawWeight < 300) { setWeight(rawWeight.toFixed(1)); gotData = true; }
-                } catch { /* characteristic not available */ }
+                  const svc = await server.getPrimaryService(0x181d);
+                  const char = await svc.getCharacteristic(0x2a9d);
+                  await char.startNotifications();
+                  await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error("timeout")), 8000);
+                    char.addEventListener("characteristicvaluechanged", (event: any) => {
+                      clearTimeout(timeout);
+                      const val = event.target.value as DataView;
+                      const rawWeight = val.getUint16(1, true) * 0.005;
+                      if (rawWeight > 5 && rawWeight < 300) { setWeight(rawWeight.toFixed(1)); gotData = true; }
+                      resolve();
+                    });
+                  });
+                  await char.stopNotifications();
+                } catch (e: any) { console.warn("Scale characteristic:", e?.message); }
               }
 
               if (gotData) {

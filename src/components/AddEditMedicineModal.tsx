@@ -44,17 +44,25 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
     }
   };
 
+  const [formError, setFormError] = useState<string>("");
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError("");
     if (!name.trim()) return;
-
+    const total = Number(totalQuantity);
+    const remaining = Number(remainingQuantity);
+    if (remaining > total && total > 0) {
+      setFormError(`คงเหลือ (${remaining}) มากกว่าจำนวนต่อครั้งที่รับ (${total}) — กรุณาตรวจสอบ`);
+      return;
+    }
     onSave({
       profileId,
       name: name.trim(),
       genericName: genericName.trim(),
       purpose: purpose.trim(),
-      totalQuantity: Number(totalQuantity),
-      remainingQuantity: Number(remainingQuantity),
+      totalQuantity: total,
+      remainingQuantity: remaining,
       lowThreshold: Number(lowThreshold),
       unit: unit.trim(),
       dosagePerTime: Number(dosagePerTime),
@@ -141,12 +149,7 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
                 min="1"
                 required
                 value={totalQuantity}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setTotalQuantity(v);
-                  // Only auto-adjust remaining if it exceeds total AND both are non-zero
-                  if (v > 0 && remainingQuantity > v) setRemainingQuantity(v);
-                }}
+                onChange={(e) => setTotalQuantity(Number(e.target.value))}
                 className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 font-bold text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
               <p className="text-[10px] text-slate-400 mt-1">จำนวนที่รับมาต่อรอบ เช่น 60 เม็ด</p>
@@ -160,12 +163,7 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
                 min="0"
                 required
                 value={remainingQuantity}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setRemainingQuantity(v);
-                  // totalQuantity must be ≥ remaining
-                  if (v > totalQuantity) setTotalQuantity(v);
-                }}
+                onChange={(e) => setRemainingQuantity(Number(e.target.value))}
                 className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               />
               <p className="text-[10px] text-slate-400 mt-1">นับจากที่เหลือจริงในกล่อง</p>
@@ -292,9 +290,10 @@ export const AddEditMedicineModal: React.FC<AddEditMedicineModalProps> = ({
           </div>
 
           <div className="flex gap-3 pt-3">
+            {formError && (
+              <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{formError}</p>
+            )}
             <button
-              type="button"
-              onClick={onClose}
               className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-all"
             >
               ยกเลิก

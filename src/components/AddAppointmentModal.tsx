@@ -55,19 +55,71 @@ export const AddAppointmentModal: React.FC<AddAppointmentModalProps> = ({
       if (isPdf) {
         const text = await extractTextFromPdfFile(file);
         if (!text || text.trim().length < 20) {
-          setParseMsg({ ok: false, text: "PDF นี้ไม่มีข้อความ (เป็นไฟล์สแกน/รูป) — กรุณาวางข้อความจากใบนัดด้านล่างแทน" });
-          setShowPaste(true);
+          setParseMsg({ ok: false, text: "PDF นี้ไม่มีข้อความ (เป็นไฟล์สแกน) — กำลังลองอ่านด้วย AI..." });
+          await extractWithClaude(file, "application/pdf");
         } else {
           applyParsed(text);
         }
       } else {
-        setParseMsg({ ok: false, text: "📷 รูปภาพไม่มีข้อความให้อ่าน (ต้องใช้ OCR ที่ยังไม่รองรับ) — กรุณาพิมพ์/วางข้อความจากใบนัดด้านล่าง" });
-        setShowPaste(true);
+        // Image — send to Claude Vision
+        setParseMsg({ ok: false, text: "📷 กำลังอ่านรูปด้วย AI..." });
+        await extractWithClaude(file, file.type || "image/jpeg");
       }
     } catch {
       setParseMsg({ ok: false, text: "เกิดข้อผิดพลาดในการอ่านไฟล์" });
     } finally {
       setParsing(false);
+    }
+  };
+
+  const extractWithClaude = async (file: File, mediaType: string) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+      const isImage = mediaType.startsWith("image/");
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 400,
+          messages: [{
+            role: "user",
+            content: [
+              isImage
+                ? { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } }
+                : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+              {
+                type: "text",
+                text: `คุณเป็น parser ใบนัดพบแพทย์ภาษาไทย ดึงข้อมูลจากใบนัดนี้แล้วตอบ JSON เท่านั้น ไม่มีข้อความอื่น รูปแบบ:
+{"doctorName":"","hospital":"","department":"","appointmentDate":"YYYY-MM-DD","appointmentTime":"HH:mm","purpose":""}
+- appointmentDate ให้แปลงเป็น ค.ศ. (พ.ศ.2569 = ค.ศ.2026)
+- ถ้าไม่มีข้อมูลใดให้ใส่ "" ห้ามใส่ null
+- ตอบ JSON เท่านั้น`
+              }
+            ]
+          }]
+        })
+      });
+      if (!response.ok) throw new Error(`API ${response.status}`);
+      const data = await response.json();
+      const rawText = (data.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+      const cleaned = rawText.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      const got: string[] = [];
+      if (parsed.doctorName) { setDoctorName(parsed.doctorName); got.push("แพทย์"); }
+      if (parsed.hospital) { setHospital(parsed.hospital); got.push("โรงพยาบาล"); }
+      if (parsed.department) { setDepartment(parsed.department); got.push("แผนก"); }
+      if (parsed.appointmentDate) { setAppointmentDate(parsed.appointmentDate); got.push("วันนัด"); }
+      if (parsed.appointmentTime) { setAppointmentTime(parsed.appointmentTime); got.push("เวลา"); }
+      if (parsed.purpose) { setPurpose(parsed.purpose); got.push("วัตถุประสงค์"); }
+      if (got.length > 0) {
+        setParseMsg({ ok: true, text: `✅ AI อ่านได้: ${got.join(", ")} — ตรวจทานก่อนบันทึก` });
+      } else {
+        setParseMsg({ ok: false, text: "AI อ่านไม่พบข้อมูลนัด — กรุณากรอกด้วยตนเอง" });
+      }
+    } catch (e: any) {
+      setParseMsg({ ok: false, text: `AI อ่านไม่ได้: ${e?.message || "error"} — กรุณากรอกเอง` });
     }
   };
 
