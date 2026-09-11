@@ -311,14 +311,14 @@ export default function App() {
     }
   };
 
-  // Toggle Medication Intake (taken vs skipped)
-  const handleToggleIntake = (medicineId: string, meal: MealTime, status: "taken" | "skipped") => {
-    const todayStr = new Date().toISOString().split("T")[0];
+  // Toggle Medication Intake (taken vs skipped) — date param enables backdating
+  const handleToggleIntake = (medicineId: string, meal: MealTime, status: "taken" | "skipped", date?: string) => {
+    const targetDate = date || new Date().toISOString().split("T")[0];
     const nowTimeStr = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
 
     setData((prev) => {
       const existingIndex = prev.intakeLogs.findIndex(
-        (l) => l.profileId === activeProfile.id && l.medicineId === medicineId && l.date === todayStr && l.meal === meal
+        (l) => l.profileId === activeProfile.id && l.medicineId === medicineId && l.date === targetDate && l.meal === meal
       );
 
       let updatedLogs = [...prev.intakeLogs];
@@ -354,7 +354,7 @@ export default function App() {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           profileId: activeProfile.id,
           medicineId,
-          date: todayStr,
+          date: targetDate,
           meal,
           status,
           timestamp: nowTimeStr,
@@ -402,7 +402,7 @@ export default function App() {
         id: `refill_${Date.now()}`,
         profileId: activeProfile.id,
         medicineId,
-        date: todayStr,
+        date: targetDate,
         addedQuantity: addQty,
         cost,
         source,

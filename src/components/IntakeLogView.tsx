@@ -15,7 +15,7 @@ interface IntakeLogViewProps {
   activeProfile: UserProfile;
   medicines: Medicine[];
   intakeLogs: IntakeLog[];
-  onToggleIntake: (medicineId: string, meal: MealTime, status: "taken" | "skipped") => void;
+  onToggleIntake: (medicineId: string, meal: MealTime, status: "taken" | "skipped", date: string) => void;
 }
 
 export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
@@ -24,10 +24,12 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
   intakeLogs,
   onToggleIntake,
 }) => {
-  const [selectedDate, setSelectedDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedMeal, setSelectedMeal] = useState<MealTime | "all">("all");
+
+  const isBackdate = selectedDate < todayStr;
+  const isFuture = selectedDate > todayStr;
 
   const profileMeds = medicines.filter((m) => m.profileId === activeProfile.id);
 
@@ -81,11 +83,25 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
           <input
             type="date"
             value={selectedDate}
+            max={todayStr}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           />
+          {selectedDate === todayStr ? (
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">วันนี้</span>
+          ) : (
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">📅 ย้อนหลัง</span>
+          )}
         </div>
       </div>
+
+      {/* Backdate notice */}
+      {isBackdate && (
+        <div className="px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-semibold flex items-center gap-2">
+          <span>📅</span>
+          <span>กำลังบันทึกย้อนหลัง — ยอดคงเหลือจะถูกปรับตามจริง กรุณาตรวจสอบก่อนกด</span>
+        </div>
+      )}
 
       {/* Adherence Summary Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -210,7 +226,7 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
 
                           <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                             <button
-                              onClick={() => onToggleIntake(med.id, meal.id, "taken")}
+                              onClick={() => onToggleIntake(med.id, meal.id, "taken", selectedDate)}
                               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                                 isTaken
                                   ? "bg-emerald-700 text-white shadow-xs"
@@ -222,7 +238,7 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
                             </button>
 
                             <button
-                              onClick={() => onToggleIntake(med.id, meal.id, "skipped")}
+                              onClick={() => onToggleIntake(med.id, meal.id, "skipped", selectedDate)}
                               className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                                 isSkipped
                                   ? "bg-slate-700 text-white"

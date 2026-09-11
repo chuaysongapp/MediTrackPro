@@ -44,7 +44,7 @@ interface DashboardViewProps {
   vitals: HealthVital[];
   appointments: DoctorAppointment[];
   lineConfig: LineConfig;
-  onToggleIntake: (medicineId: string, meal: MealTime, status: "taken" | "skipped") => void;
+  onToggleIntake: (medicineId: string, meal: MealTime, status: "taken" | "skipped", date?: string) => void;
   onOpenAddVitals: () => void;
   onEditVital?: (v: HealthVital) => void;
   onDeleteVital?: (id: string) => void;
