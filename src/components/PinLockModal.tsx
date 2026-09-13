@@ -1,60 +1,61 @@
-import React, { useState } from "react";
-import { Lock, KeyRound, AlertCircle, X } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Lock, AlertCircle, X, Delete } from "lucide-react";
 import { UserProfile } from "../types";
+import { verifyPin } from "../utils/appLock";
 
 interface PinLockModalProps {
-  targetProfile: UserProfile | null;
+  profile: UserProfile | null;    // prop name matches what App.tsx passes
   onSuccess: () => void;
   onClose: () => void;
 }
 
 export const PinLockModal: React.FC<PinLockModalProps> = ({
-  targetProfile,
+  profile,
   onSuccess,
   onClose,
 }) => {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
 
-  if (!targetProfile) return null;
+  if (!profile) return null;
 
-  const handleVerify = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pin === targetProfile.pinCode) {
-      setError("");
+  const hasPbkdf2Pin = !profile.pinCode; // if plaintext pin is gone, use appLock
+  // Legacy: profile.pinCode is still plaintext 4-digit stored in profile object
+  // New: use verifyPin from appLock (PBKDF2) — profile.pinCode will be empty once migrated
+
+  const verify = async (code: string) => {
+    if (code.length < 4) return;
+    setChecking(true);
+    setError("");
+    let ok = false;
+    // First try PBKDF2 (new secure storage via appLock)
+    ok = await verifyPin(code);
+    // Fallback: compare against legacy plaintext PIN stored in profile
+    if (!ok && profile.pinCode && profile.pinCode === code) ok = true;
+    setChecking(false);
+    if (ok) {
       onSuccess();
     } else {
-      setError("รหัส PIN 4 หลักไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง");
+      setError("PIN ไม่ถูกต้อง กรุณาลองใหม่");
+      setPin("");
     }
   };
 
-  const handleKeyClick = (num: string) => {
-    if (pin.length < 4) {
-      const nextPin = pin + num;
-      setPin(nextPin);
-      setError("");
-      if (nextPin.length === 4) {
-        if (nextPin === targetProfile.pinCode) {
-          onSuccess();
-        } else {
-          setError("รหัส PIN 4 หลักไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง");
-        }
-      }
-    }
-  };
-
-  const handleBackspace = () => {
-    setPin((prev) => prev.slice(0, -1));
+  const press = (d: string) => {
+    if (checking) return;
     setError("");
+    const next = (pin + d).slice(0, 4);
+    setPin(next);
+    if (next.length === 4) verify(next);
   };
+
+  const keys = ["1","2","3","4","5","6","7","8","9"];
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 relative border border-slate-100 animate-in fade-in zoom-in duration-200">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
-        >
+      <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 relative border border-slate-100">
+        <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors cursor-pointer">
           <X className="w-5 h-5" />
         </button>
 
@@ -64,7 +65,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
           </div>
           <h3 className="text-xl font-bold text-slate-800">ยืนยันตัวตนก่อนสลับบัญชี</h3>
           <p className="text-sm text-slate-500 mt-1">
-            ใส่รหัส PIN 4 หลักสำหรับ <span className="font-semibold text-emerald-700">{targetProfile.name}</span>
+            ใส่ PIN สำหรับ <span className="font-semibold text-emerald-700">{profile.name}</span>
           </p>
         </div>
 
@@ -75,58 +76,31 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
           </div>
         )}
 
-        {/* PIN Dots Display */}
         <div className="flex justify-center gap-4 mb-6">
-          {[0, 1, 2, 3].map((idx) => (
-            <div
-              key={idx}
-              className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
-                pin.length > idx
-                  ? "bg-emerald-600 border-emerald-600 scale-110"
-                  : "border-slate-300 bg-slate-50"
-              }`}
-            />
+          {[0,1,2,3].map((i) => (
+            <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
+              pin.length > i ? "bg-emerald-600 border-emerald-600 scale-110" : "border-slate-300 bg-slate-50"
+            }`} />
           ))}
         </div>
 
-        {/* Numeric Keypad */}
         <div className="grid grid-cols-3 gap-3 mb-4">
-          {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-            <button
-              key={num}
-              type="button"
-              onClick={() => handleKeyClick(num)}
-              className="h-12 rounded-2xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 font-bold text-lg text-slate-800 transition-all active:scale-95 flex items-center justify-center shadow-xs"
-            >
-              {num}
+          {keys.map((k) => (
+            <button key={k} type="button" onClick={() => press(k)} disabled={checking}
+              className="h-12 rounded-2xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 font-bold text-lg text-slate-800 transition-all active:scale-95 flex items-center justify-center shadow-xs cursor-pointer disabled:opacity-50">
+              {k}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => setPin("")}
-            className="h-12 rounded-2xl bg-slate-50 hover:bg-slate-200 text-xs font-semibold text-slate-500 transition-all flex items-center justify-center"
-          >
-            ล้าง
-          </button>
-          <button
-            type="button"
-            onClick={() => handleKeyClick("0")}
-            className="h-12 rounded-2xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 font-bold text-lg text-slate-800 transition-all active:scale-95 flex items-center justify-center shadow-xs"
-          >
-            0
-          </button>
-          <button
-            type="button"
-            onClick={handleBackspace}
-            className="h-12 rounded-2xl bg-slate-50 hover:bg-slate-200 text-xs font-semibold text-slate-600 transition-all flex items-center justify-center"
-          >
-            ⌫ ลบ
+          <button type="button" onClick={() => { setPin(""); setError(""); }} className="h-12 rounded-2xl bg-slate-50 hover:bg-slate-200 text-xs font-semibold text-slate-500 transition-all flex items-center justify-center cursor-pointer">ล้าง</button>
+          <button type="button" onClick={() => press("0")} disabled={checking}
+            className="h-12 rounded-2xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 font-bold text-lg text-slate-800 transition-all active:scale-95 flex items-center justify-center shadow-xs cursor-pointer disabled:opacity-50">0</button>
+          <button type="button" onClick={() => { setPin((p) => p.slice(0,-1)); setError(""); }}
+            className="h-12 rounded-2xl bg-slate-50 hover:bg-slate-200 text-slate-600 transition-all flex items-center justify-center cursor-pointer">
+            <Delete className="w-5 h-5" />
           </button>
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-2">
-          เพื่อความปลอดภัยของข้อมูลสุขภาพและคลังยาประจำตัว
-        </p>
+        <p className="text-center text-xs text-slate-400 mt-2">เพื่อความปลอดภัยของข้อมูลสุขภาพและคลังยาประจำตัว</p>
       </div>
     </div>
   );

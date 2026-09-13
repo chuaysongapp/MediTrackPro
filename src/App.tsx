@@ -311,7 +311,7 @@ export default function App() {
     }
   };
 
-  // Toggle Medication Intake (taken vs skipped) — date param enables backdating
+  // Toggle Medication Intake — date param enables backdating
   const handleToggleIntake = (medicineId: string, meal: MealTime, status: "taken" | "skipped", date?: string) => {
     const targetDate = date || new Date().toISOString().split("T")[0];
     const nowTimeStr = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
@@ -354,6 +354,8 @@ export default function App() {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           profileId: activeProfile.id,
           medicineId,
+          medicineName: med?.name || "",
+          unit: med?.unit || "เม็ด",
           date: targetDate,
           meal,
           status,
@@ -391,18 +393,21 @@ export default function App() {
           return {
             ...m,
             remainingQuantity: m.remainingQuantity + addQty,
-            totalQuantity: (m.totalQuantity || 60) + addQty,
+            // totalQuantity stays as the configured per-batch amount — don't accumulate
             updatedAt: new Date().toISOString(),
           };
         }
         return m;
       });
 
+      const med = prev.medicines.find((m) => m.id === medicineId);
       const newRefillEntry = {
         id: `refill_${Date.now()}`,
         profileId: activeProfile.id,
         medicineId,
-        date: targetDate,
+        medicineName: med?.name || "",
+        unit: med?.unit || "เม็ด",
+        date: todayStr,
         addedQuantity: addQty,
         cost,
         source,
@@ -709,6 +714,8 @@ export default function App() {
             medicines={data.medicines}
             vitals={data.vitals}
             intakeLogs={data.intakeLogs}
+            refillHistory={data.refillHistory}
+            medicalRecords={data.medicalRecords}
             onOpenDoctorReport={() => setShowDoctorReportModal(true)}
           />
         )}

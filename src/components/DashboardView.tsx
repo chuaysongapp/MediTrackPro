@@ -429,21 +429,25 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
 
             {latestVital ? (
               <div className="space-y-2.5">
-                {/* Edit / Delete controls */}
-                <div className="flex items-center justify-end gap-2">
-                  {onEditVital && (
-                    <button
-                      onClick={() => onEditVital(latestVital)}
-                      className="text-[10px] font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
-                    >✏️ แก้ไข</button>
-                  )}
-                  {onDeleteVital && (
-                    <button
-                      onClick={() => onDeleteVital(latestVital.id)}
-                      className="text-[10px] font-bold text-slate-400 hover:text-red-600 flex items-center gap-1 cursor-pointer"
-                    >🗑 ลบ</button>
-                  )}
-                </div>
+                {/* Vital history list — edit/delete on any record */}
+                {profileVitals.slice(0, 3).map((v, idx) => (
+                  <div key={v.id} className={`flex items-center justify-between text-xs px-2 py-1 rounded-lg ${idx === 0 ? "bg-emerald-50" : "bg-slate-50"}`}>
+                    <span className="text-slate-500 font-semibold">{formatThaiDateShort(v.date)}</span>
+                    <span className="text-slate-700 font-bold">
+                      {v.systolicBP && v.diastolicBP ? `${v.systolicBP}/${v.diastolicBP} mmHg` : ""}
+                      {v.bloodSugar ? ` · ${v.bloodSugar} mg/dL` : ""}
+                      {v.weight ? ` · ${v.weight} kg` : ""}
+                    </span>
+                    <div className="flex gap-2">
+                      {onEditVital && (
+                        <button onClick={() => onEditVital(v)} className="text-[10px] font-bold text-slate-400 hover:text-emerald-700 cursor-pointer">✏️</button>
+                      )}
+                      {onDeleteVital && (
+                        <button onClick={() => onDeleteVital(v.id)} className="text-[10px] font-bold text-slate-400 hover:text-red-600 cursor-pointer">🗑</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
                 <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex justify-between">
                     <span>ความดันโลหิต</span>

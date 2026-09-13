@@ -19,11 +19,8 @@ export function loadSystemData(): SystemData {
       profiles: parsed.profiles && parsed.profiles.length > 0 ? parsed.profiles : initialSystemData.profiles,
       medicines: parsed.medicines || [],
       intakeLogs: parsed.intakeLogs || [],
-      refillHistory: parsed.refillHistory || [],
-      vitals: parsed.vitals || [],
-      appointments: parsed.appointments || [],
-      medicalRecords: parsed.medicalRecords || [],
       refillHistory: parsed.refillHistory || (parsed as any).refillLogs || [],
+      vitals: parsed.vitals || [],
       lineConfig: { ...initialSystemData.lineConfig, ...(parsed.lineConfig || {}) },
     };
   } catch (e) {
@@ -67,14 +64,16 @@ export function clearAllSystemData(): SystemData {
   return initialSystemData;
 }
 
-export async function syncToCloud(data: SystemData, backupKey = "default_backup"): Promise<boolean> {
-  const result = await syncCloudBackup(data, backupKey);
-  return result.success;
+// NOTE: syncToCloud/fetchFromCloud previously called /api/backup/* which doesn't work
+// on GitHub Pages. Use firebase.ts saveUserDataToFirestore/loadUserDocFromFirestore instead.
+export async function syncToCloud(_data: SystemData, _backupKey = "default_backup"): Promise<boolean> {
+  console.warn("syncToCloud: /api/backup/* is unavailable on GitHub Pages. Use Firestore sync instead.");
+  return false;
 }
 
-export async function fetchFromCloud(backupKey = "default_backup"): Promise<SystemData | null> {
-  const result = await restoreCloudBackup(backupKey);
-  return result.success && result.payload ? result.payload : null;
+export async function fetchFromCloud(_backupKey = "default_backup"): Promise<SystemData | null> {
+  console.warn("fetchFromCloud: /api/backup/* is unavailable on GitHub Pages. Use Firestore sync instead.");
+  return null;
 }
 
 export function exportBackupJSON(data: SystemData): void {
@@ -109,29 +108,4 @@ export async function importBackupJSON(file: File): Promise<SystemData> {
   });
 }
 
-export async function syncCloudBackup(data: SystemData, backupKey: string): Promise<{ success: boolean; updatedAt?: string; error?: string }> {
-  try {
-    const res = await fetch("/api/backup/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ backupKey, payload: data }),
-    });
-    const result = await res.json();
-    return result;
-  } catch (err: any) {
-    return { success: false, error: err.message || "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์สำรองข้อมูลได้" };
-  }
-}
-
-export async function restoreCloudBackup(backupKey: string): Promise<{ success: boolean; payload?: SystemData; error?: string }> {
-  try {
-    const res = await fetch(`/api/backup/load/${encodeURIComponent(backupKey)}`);
-    const result = await res.json();
-    if (result.success && result.payload) {
-      saveSystemData(result.payload);
-    }
-    return result;
-  } catch (err: any) {
-    return { success: false, error: err.message || "ไม่สามารถดึงข้อมูลสำรองจากคลาวด์ได้" };
-  }
-}
+// End of storage utilities

@@ -27,9 +27,7 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
   const todayStr = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedMeal, setSelectedMeal] = useState<MealTime | "all">("all");
-
   const isBackdate = selectedDate < todayStr;
-  const isFuture = selectedDate > todayStr;
 
   const profileMeds = medicines.filter((m) => m.profileId === activeProfile.id);
 
@@ -87,7 +85,7 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
             onChange={(e) => setSelectedDate(e.target.value)}
             className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           />
-          {selectedDate === todayStr ? (
+          {!isBackdate ? (
             <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">วันนี้</span>
           ) : (
             <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">📅 ย้อนหลัง</span>
@@ -99,7 +97,7 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
       {isBackdate && (
         <div className="px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-semibold flex items-center gap-2">
           <span>📅</span>
-          <span>กำลังบันทึกย้อนหลัง — ยอดคงเหลือจะถูกปรับตามจริง กรุณาตรวจสอบก่อนกด</span>
+          <span>กำลังบันทึกย้อนหลัง — ยอดยาคงเหลือจะถูกปรับจากยอดปัจจุบัน กรุณาตรวจสอบก่อนกด</span>
         </div>
       )}
 

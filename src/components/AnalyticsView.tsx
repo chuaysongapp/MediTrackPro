@@ -29,7 +29,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { Medicine, HealthVital, IntakeLog, UserProfile } from "../types";
+import { Medicine, HealthVital, IntakeLog, UserProfile, RefillTransaction, MedicalRecord } from "../types";
 import { formatThaiDateShort, evaluateBP, evaluateSugar, calculateBMI } from "../utils/thaiHelpers";
 
 interface AnalyticsViewProps {
@@ -37,6 +37,8 @@ interface AnalyticsViewProps {
   medicines: Medicine[];
   vitals: HealthVital[];
   intakeLogs: IntakeLog[];
+  refillHistory?: RefillTransaction[];
+  medicalRecords?: MedicalRecord[];
   onOpenDoctorReport?: () => void;
 }
 
@@ -45,6 +47,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   medicines,
   vitals,
   intakeLogs,
+  refillHistory = [],
+  medicalRecords = [],
   onOpenDoctorReport,
 }) => {
   const [aiAdvice, setAiAdvice] = useState<string>("");
