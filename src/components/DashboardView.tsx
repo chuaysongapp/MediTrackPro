@@ -37,6 +37,7 @@ import {
   calculateBMI,
   localDateStr,
 } from "../utils/thaiHelpers";
+import { summarizeDay } from "../utils/intakeSummary";
 
 interface DashboardViewProps {
   activeProfile: UserProfile;
@@ -111,25 +112,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     { id: "bedtime", title: "ก่อนนอน", icon: "🌙", timeHint: "21:00 - 22:00 น." },
   ];
 
-  // Adherence calculation for today
-  let totalTodayDoses = 0;
-  let takenTodayDoses = 0;
-  mealsList.forEach((m) => {
-    const medsForMeal = profileMeds.filter((med) => med.schedules.includes(m.id));
-    totalTodayDoses += medsForMeal.length;
-    medsForMeal.forEach((med) => {
-      const log = todayLogs.find((l) => l.medicineId === med.id && l.meal === m.id);
-      if (log?.status === "taken") takenTodayDoses++;
-    });
-  });
-  const todayAdherencePct = totalTodayDoses > 0 ? Math.round((takenTodayDoses / totalTodayDoses) * 100) : 100;
+  // Adherence calculation for today (items = medicine × meal)
+  const todaySummary = summarizeDay(profileMeds, todayLogs, todayStr);
+  const totalTodayDoses = todaySummary.total;
+  const takenTodayDoses = todaySummary.taken;
+  const todayAdherencePct = todaySummary.pct;
 
   // Quick send LINE summary
   const handleSendSummaryToLine = () => {
     const text = `📌 สรุปทานยาประจำวันสำหรับ ${activeProfile.name}
 วันที่: ${formatThaiDate(todayStr)}
 ------------------------
-💊 ความสม่ำเสมอในการทานยา: ${todayAdherencePct}% (${takenTodayDoses}/${totalTodayDoses} มื้อ)
+💊 ความสม่ำเสมอในการทานยา: ${todayAdherencePct}% (${takenTodayDoses}/${totalTodayDoses} รายการ · ครบ ${todaySummary.mealsComplete}/${todaySummary.mealsScheduled} มื้อ)
 ${lowStockMeds.length > 0 ? `⚠️ ยาใกล้หมดคลัง (${lowStockMeds.length} รายการ): ${lowStockMeds.map((m) => m.name).join(", ")}` : "✅ คลังยาเพียงพอปกติ"}
 ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latestVital.systolicBP}/${latestVital.diastolicBP} mmHg\n💉 ค่าน้ำตาล: ${latestVital.bloodSugar} mg/dL` : ""}`;
 
@@ -195,8 +189,15 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ความสม่ำเสมอวันนี้</p>
               <div className="text-xl font-bold text-blue-400 mt-0.5">{todayAdherencePct}%</div>
               <p className="text-[10px] text-slate-400">
-                ทานแล้ว {takenTodayDoses}/{totalTodayDoses} มื้อ
+                ทานแล้ว {takenTodayDoses}/{totalTodayDoses} รายการ · ครบ {todaySummary.mealsComplete}/{todaySummary.mealsScheduled} มื้อ
               </p>
+              {totalTodayDoses > 0 && takenTodayDoses < totalTodayDoses && (
+                <p className="text-[10px] mt-0.5">
+                  <span className="text-rose-400">ข้าม {todaySummary.skipped}</span>
+                  <span className="text-slate-500"> · </span>
+                  <span className="text-amber-400">ยังไม่บันทึก {todaySummary.unrecorded}</span>
+                </p>
+              )}
             </div>
 
             <button

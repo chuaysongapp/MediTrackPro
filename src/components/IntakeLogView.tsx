@@ -11,6 +11,7 @@ import {
 import { Medicine, IntakeLog, UserProfile, MealTime } from "../types";
 import { MEAL_NAMES_TH, FOOD_RELATION_TH, formatThaiDate, localDateStr } from "../utils/thaiHelpers";
 import { IntakeCalendar } from "./IntakeCalendar";
+import { summarizeDay, describeCompleteMeals, describeIncompleteMeals } from "../utils/intakeSummary";
 
 interface IntakeLogViewProps {
   activeProfile: UserProfile;
@@ -42,22 +43,12 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
     { id: "bedtime", label: "ก่อนนอน", icon: "🌙" },
   ];
 
-  // Count total scheduled doses for selected date
-  let totalDoses = 0;
-  let takenDoses = 0;
-  let skippedDoses = 0;
-
-  mealsList.forEach((m) => {
-    const medsInMeal = profileMeds.filter((med) => med.schedules.includes(m.id));
-    totalDoses += medsInMeal.length;
-    medsInMeal.forEach((med) => {
-      const log = logsForDate.find((l) => l.medicineId === med.id && l.meal === m.id);
-      if (log?.status === "taken") takenDoses++;
-      if (log?.status === "skipped") skippedDoses++;
-    });
-  });
-
-  const adherenceRate = totalDoses > 0 ? Math.round((takenDoses / totalDoses) * 100) : 100;
+  // Summary for the selected date (items = medicine × meal)
+  const summary = summarizeDay(profileMeds, profileLogs, selectedDate);
+  const completeMealsText = describeCompleteMeals(summary);
+  const incompleteMealsText = describeIncompleteMeals(summary);
+  const unrecordedLabel = isBackdate ? "ไม่ได้บันทึก" : "ยังไม่บันทึก";
+  const allDone = summary.total > 0 && summary.taken === summary.total;
 
   return (
     <div className="space-y-6 pb-12">
@@ -105,30 +96,46 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
 
       {/* Adherence Summary Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-emerald-950 text-white p-4 rounded-3xl border border-emerald-900 flex items-center justify-between shadow-xs">
-          <div>
-            <p className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">ความสม่ำเสมอประจำวัน</p>
-            <p className="text-2xl font-black text-emerald-400 mt-0.5">{adherenceRate}%</p>
-          </div>
-          <div className="w-12 h-12 bg-emerald-900/80 rounded-2xl flex items-center justify-center font-bold text-emerald-300">
-            {takenDoses}/{totalDoses}
-          </div>
+        <div className="bg-emerald-950 text-white p-4 rounded-3xl border border-emerald-900 shadow-xs">
+          <p className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">ความสม่ำเสมอประจำวัน</p>
+          <p className="text-2xl font-black text-emerald-400 mt-0.5">{summary.pct}%</p>
+          <p className="text-xs text-emerald-300 mt-1">
+            {summary.total > 0
+              ? `${summary.taken}/${summary.total} รายการ · ครบ ${summary.mealsComplete} จาก ${summary.mealsScheduled} มื้อ`
+              : "ไม่มีรายการยาในวันนี้"}
+          </p>
         </div>
 
         <div className="bg-white p-4 rounded-3xl border border-slate-200 flex items-center justify-between shadow-xs">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ทานยาเรียบร้อยแล้ว</p>
-            <p className="text-2xl font-black text-emerald-600 mt-0.5">{takenDoses} มื้อ</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ทานยาแล้ว</p>
+            <p className="text-2xl font-black text-emerald-600 mt-0.5">{summary.taken} รายการ</p>
+            {completeMealsText && <p className="text-xs text-slate-500 mt-1">{completeMealsText}</p>}
           </div>
-          <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+          <CheckCircle2 className="w-8 h-8 text-emerald-500 shrink-0" />
         </div>
 
         <div className="bg-white p-4 rounded-3xl border border-slate-200 flex items-center justify-between shadow-xs">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ข้ามมื้อ / ยังไม่ได้ทาน</p>
-            <p className="text-2xl font-black text-amber-600 mt-0.5">{totalDoses - takenDoses} มื้อ</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ยังไม่ครบ</p>
+            {summary.total === 0 ? (
+              <p className="text-2xl font-black text-slate-400 mt-0.5">-</p>
+            ) : allDone ? (
+              <p className="text-xl font-black text-emerald-600 mt-0.5">ครบทุกรายการ</p>
+            ) : (
+              <p className="text-xl font-black mt-0.5">
+                <span className="text-rose-600">ข้าม {summary.skipped}</span>
+                <span className="text-slate-300 mx-1.5">·</span>
+                <span className="text-amber-600">{unrecordedLabel} {summary.unrecorded}</span>
+              </p>
+            )}
+            {!allDone && incompleteMealsText && <p className="text-xs text-slate-500 mt-1">{incompleteMealsText}</p>}
           </div>
-          <AlertCircle className="w-8 h-8 text-amber-500" />
+          {allDone ? (
+            <CheckCircle2 className="w-8 h-8 text-emerald-500 shrink-0" />
+          ) : (
+            <AlertCircle className="w-8 h-8 text-amber-500 shrink-0" />
+          )}
         </div>
       </div>
 
