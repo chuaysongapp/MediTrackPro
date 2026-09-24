@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { localDateStr } from "./utils/thaiHelpers";
 import { User, onAuthStateChanged } from "firebase/auth";
 import { SystemData, UserProfile, Medicine, MealTime, FoodRelation, HealthVital, DoctorAppointment, LineConfig, MedicalRecord } from "./types";
 import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData, getLocalUpdatedAt, markLocalModified } from "./utils/storage";
@@ -338,7 +339,7 @@ export default function App() {
 
   // Toggle Medication Intake — date param enables backdating
   const handleToggleIntake = (medicineId: string, meal: MealTime, status: "taken" | "skipped", date?: string) => {
-    const targetDate = date || new Date().toISOString().split("T")[0];
+    const targetDate = date || localDateStr();
     const nowTimeStr = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
 
     setData((prev) => {
@@ -410,7 +411,7 @@ export default function App() {
     source?: string,
     note?: string
   ) => {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = localDateStr();
 
     setData((prev) => {
       const updatedMeds = prev.medicines.map((m) => {

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { localDateStr } from "../utils/thaiHelpers";
 import {
   X,
   FileText,
@@ -45,7 +46,7 @@ export const AddMedicalRecordModal: React.FC<AddMedicalRecordModalProps> = ({
   const [title, setTitle] = useState<string>("ผลตรวจเลือดและเคมีคลินิก");
   const [hospital, setHospital] = useState<string>("");
   const [patientName, setPatientName] = useState<string>(profileName);
-  const [date, setDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState<string>(localDateStr());
   const [diagnosis, setDiagnosis] = useState<string>("");
   const [doctorNotes, setDoctorNotes] = useState<string>("");
   const [pdfFileName, setPdfFileName] = useState<string>("");

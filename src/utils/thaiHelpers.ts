@@ -98,3 +98,13 @@ export function evaluateSugar(sugar?: number, type: "fasting" | "after_meal" | "
     return { status: "ค่าน้ำตาลสูงหลังอาหาร (≥200)", color: "text-red-700 bg-red-50 border-red-200", isWarning: true };
   }
 }
+
+/** Local (device time zone) date as YYYY-MM-DD.
+ *  Use this instead of toISOString().split("T")[0], which returns the UTC date —
+ *  in Thailand (UTC+7) that is still "yesterday" between 00:00 and 06:59. */
+export function localDateStr(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}

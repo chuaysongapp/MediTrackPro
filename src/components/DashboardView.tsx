@@ -35,6 +35,7 @@ import {
   evaluateBP,
   evaluateSugar,
   calculateBMI,
+  localDateStr,
 } from "../utils/thaiHelpers";
 
 interface DashboardViewProps {
@@ -73,7 +74,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenEditProfile,
 }) => {
   const [showQuickMenu, setShowQuickMenu] = useState<boolean>(false);
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = localDateStr();
 
   // Current active profile medicines
   const profileMeds = medicines.filter((m) => m.profileId === activeProfile.id);

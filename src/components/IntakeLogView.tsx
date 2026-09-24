@@ -9,7 +9,8 @@ import {
   Pill,
 } from "lucide-react";
 import { Medicine, IntakeLog, UserProfile, MealTime } from "../types";
-import { MEAL_NAMES_TH, FOOD_RELATION_TH, formatThaiDate } from "../utils/thaiHelpers";
+import { MEAL_NAMES_TH, FOOD_RELATION_TH, formatThaiDate, localDateStr } from "../utils/thaiHelpers";
+import { IntakeCalendar } from "./IntakeCalendar";
 
 interface IntakeLogViewProps {
   activeProfile: UserProfile;
@@ -24,16 +25,15 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
   intakeLogs,
   onToggleIntake,
 }) => {
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = localDateStr();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedMeal, setSelectedMeal] = useState<MealTime | "all">("all");
   const isBackdate = selectedDate < todayStr;
 
   const profileMeds = medicines.filter((m) => m.profileId === activeProfile.id);
 
-  const logsForDate = intakeLogs.filter(
-    (l) => l.profileId === activeProfile.id && l.date === selectedDate
-  );
+  const profileLogs = intakeLogs.filter((l) => l.profileId === activeProfile.id);
+  const logsForDate = profileLogs.filter((l) => l.date === selectedDate);
 
   const mealsList: { id: MealTime; label: string; icon: string }[] = [
     { id: "morning", label: "มื้อเช้า", icon: "🌅" },
@@ -74,17 +74,10 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
           </p>
         </div>
 
-        {/* Date Selector */}
-        <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 shrink-0">
+        {/* Selected date */}
+        <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-2xl border border-slate-200 shrink-0">
           <Calendar className="w-4 h-4 text-emerald-700" />
-          <span className="text-xs font-bold text-slate-700">วันที่:</span>
-          <input
-            type="date"
-            value={selectedDate}
-            max={todayStr}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-          />
+          <span className="text-xs font-bold text-slate-900">{formatThaiDate(selectedDate)}</span>
           {!isBackdate ? (
             <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">วันนี้</span>
           ) : (
@@ -92,6 +85,15 @@ export const IntakeLogView: React.FC<IntakeLogViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Month calendar */}
+      <IntakeCalendar
+        medicines={profileMeds}
+        logs={profileLogs}
+        selectedDate={selectedDate}
+        todayStr={todayStr}
+        onSelectDate={setSelectedDate}
+      />
 
       {/* Backdate notice */}
       {isBackdate && (
