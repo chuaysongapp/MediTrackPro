@@ -10,6 +10,7 @@ import {
   loadUserDataFromFirestore,
   loadUserDocFromFirestore,
   saveUserDataToFirestore,
+  handleGoogleRedirectResult,
 } from "./lib/firebase";
 import { CloudSyncBanner } from "./components/CloudSyncBanner";
 import { HeaderNavbar, UITheme } from "./components/HeaderNavbar";
@@ -52,6 +53,12 @@ export default function App() {
   // Refs to distinguish genuine user edits from load/cloud-driven data changes
   const firstDataRun = useRef(true);
   const skipNextTouch = useRef(false);
+  // Latest data for async callbacks (avoids stale closure in the auth listener)
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  // Cloud autosave is allowed ONLY after the initial cloud/local reconcile for this user
+  // succeeded — otherwise a default/empty local copy could overwrite real cloud data.
+  const cloudReadyRef = useRef(false);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [theme, setTheme] = useState<UITheme>(() => {
@@ -70,51 +77,60 @@ export default function App() {
 
   // Firebase Auth listener
   useEffect(() => {
+    // Clear any pending redirect sign-in left over from an older build (harmless if none)
+    handleGoogleRedirectResult();
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      cloudReadyRef.current = false;
       setFirebaseUser(user);
-      if (user) {
-        setIsCloudSaving(true);
-        const cloudDoc = await loadUserDocFromFirestore(user.uid);
-        const cloudData = cloudDoc?.systemData ?? null;
-        const cloudTs = cloudDoc?.updatedAt;
-        const localTs = getLocalUpdatedAt();
+      if (!user) return;
 
-        const cloudHasData = !!(cloudData && cloudData.profiles && cloudData.profiles.length > 0);
-        const cloudMeaningful = hasMeaningfulData(cloudData);
-        const localMeaningful = hasMeaningfulData(data);
-        // Local counts as "newer" only if we actually have a local timestamp AND
-        // it is strictly newer than the cloud copy (ISO strings compare correctly).
-        const localIsNewer = !!(localTs && cloudTs && localTs > cloudTs);
-
-        // Decide the source of truth by ACTUAL data, not just timestamps. This prevents
-        // a freshly-opened device (empty local, but written with a new timestamp on load)
-        // from overwriting a cloud copy that already has real records.
-        let pushLocal: boolean;
-        if (!cloudHasData) {
-          pushLocal = true; // cloud is empty → seed it from local
-        } else if (localMeaningful && !cloudMeaningful) {
-          pushLocal = true; // local has real data, cloud doesn't → restore cloud
-        } else if (localMeaningful && cloudMeaningful && localIsNewer) {
-          pushLocal = true; // both have data, local is a genuinely newer unsynced change
-        } else {
-          pushLocal = false; // otherwise cloud wins (covers fresh/empty local devices)
-        }
-
-        if (!pushLocal) {
-          // Cloud is the source of truth
-          skipNextTouch.current = true;
-          setData(cloudData as SystemData);
-          setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
-        } else {
-          // Push local up instead of letting a stale/empty cloud wipe it.
-          await saveUserDataToFirestore(user.uid, data, {
-            email: user.email,
-            displayName: user.displayName,
-          });
-          setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
-        }
+      setIsCloudSaving(true);
+      let cloudDoc: Awaited<ReturnType<typeof loadUserDocFromFirestore>>;
+      try {
+        cloudDoc = await loadUserDocFromFirestore(user.uid);
+      } catch (err) {
+        // Read failed (network / DB error). Do NOT push local — cloud may hold real data.
+        console.error("Cloud load failed; autosave paused:", err);
         setIsCloudSaving(false);
+        alert("โหลดข้อมูลจากคลาวด์ไม่สำเร็จ — ระบบหยุดซิงค์อัตโนมัติไว้ก่อนเพื่อป้องกันข้อมูลบนคลาวด์ถูกเขียนทับ\nกรุณารีเฟรชหน้าเมื่ออินเทอร์เน็ตพร้อม");
+        return;
       }
+
+      const localData = dataRef.current;
+      const cloudData = cloudDoc?.systemData ?? null;
+      const cloudTs = cloudDoc?.updatedAt;
+      const localTs = getLocalUpdatedAt();
+
+      const cloudHasData = !!(cloudData && cloudData.profiles && cloudData.profiles.length > 0);
+      const cloudMeaningful = hasMeaningfulData(cloudData);
+      const localMeaningful = hasMeaningfulData(localData);
+      const localIsNewer = !!(localTs && cloudTs && localTs > cloudTs);
+
+      let pushLocal: boolean;
+      if (!cloudHasData) {
+        pushLocal = true; // cloud doc genuinely absent/empty → seed from local
+      } else if (localMeaningful && !cloudMeaningful) {
+        pushLocal = true; // local has real data, cloud doesn't
+      } else if (localMeaningful && cloudMeaningful && localIsNewer) {
+        pushLocal = true; // genuine newer unsynced local change
+      } else {
+        pushLocal = false; // cloud wins (fresh/empty device)
+      }
+
+      if (!pushLocal) {
+        skipNextTouch.current = true;
+        setData(cloudData as SystemData);
+        setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
+      } else {
+        const ok = await saveUserDataToFirestore(user.uid, localData, {
+          email: user.email,
+          displayName: user.displayName,
+        });
+        if (ok) setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
+      }
+      cloudReadyRef.current = true; // reconcile done → autosave may run
+      setIsCloudSaving(false);
     });
     return () => unsubscribe();
   }, []);
@@ -124,8 +140,10 @@ export default function App() {
     saveData(data); // LocalStorage backup
 
     if (!firebaseUser) return;
+    if (!cloudReadyRef.current) return; // wait for initial cloud reconcile
 
     const timer = setTimeout(async () => {
+      if (!cloudReadyRef.current) return;
       setIsCloudSaving(true);
       const success = await saveUserDataToFirestore(firebaseUser.uid, data, {
         email: firebaseUser.email,
@@ -226,6 +244,7 @@ export default function App() {
     });
     if (success) {
       setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
+      cloudReadyRef.current = true;
       const n = data.medicalRecords?.length || 0;
       return { ok: true, msg: `ดันข้อมูลขึ้นคลาวด์แล้ว (ผลตรวจ ${n} รายการ)` };
     }
@@ -234,13 +253,19 @@ export default function App() {
 
   const handleForcePullCloud = async (): Promise<{ ok: boolean; msg: string }> => {
     if (!firebaseUser) return { ok: false, msg: "ยังไม่ได้ล็อกอิน — กรุณาล็อกอิน Google ก่อน" };
-    const cloudDoc = await loadUserDocFromFirestore(firebaseUser.uid);
+    let cloudDoc;
+    try {
+      cloudDoc = await loadUserDocFromFirestore(firebaseUser.uid);
+    } catch {
+      return { ok: false, msg: "เชื่อมต่อคลาวด์ไม่สำเร็จ ลองใหม่อีกครั้ง" };
+    }
     const cloudData = cloudDoc?.systemData;
     if (!cloudData) return { ok: false, msg: "ไม่พบข้อมูลบนคลาวด์" };
     skipNextTouch.current = true; // pulling from cloud must not stamp local as modified
     setData(cloudData);
     saveData(cloudData);
     setLastSavedAt(new Date().toLocaleTimeString("th-TH"));
+    cloudReadyRef.current = true;
     const n = cloudData.medicalRecords?.length || 0;
     return { ok: true, msg: `ดึงข้อมูลจากคลาวด์แล้ว (ผลตรวจ ${n} รายการ)` };
   };

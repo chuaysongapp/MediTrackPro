@@ -15,7 +15,6 @@ export async function extractTextFromPdfFile(file: File): Promise<string> {
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useSystemFonts: true,
-      isEvalSupported: false,
     });
 
     const pdf = await loadingTask.promise;
@@ -70,7 +69,6 @@ export async function renderPdfPagesToImages(file: File, maxPages = 3): Promise<
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useSystemFonts: true,
-      isEvalSupported: false,
     });
 
     const pdf = await loadingTask.promise;

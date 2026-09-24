@@ -1,9 +1,15 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth,
+  initializeAuth,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
+  browserPopupRedirectResolver,
+  Auth,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
   getRedirectResult,
   signOut,
   onAuthStateChanged,
@@ -24,7 +30,20 @@ import { SystemData } from "../types";
 // Initialize Firebase App (singleton)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-export const auth = getAuth(app);
+// Auth persistence: localStorage FIRST. The default (IndexedDB) fails on some Android
+// browsers with "Database is closing / hidden" when the page is hidden during the Google
+// popup. Firebase migrates an existing signed-in user from IndexedDB automatically.
+function buildAuth(): Auth {
+  try {
+    return initializeAuth(app, {
+      persistence: [browserLocalPersistence, indexedDBLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app); // already initialized (hot reload)
+  }
+}
+export const auth = buildAuth();
 
 // Deep-remove undefined values before writing to Firestore.
 function stripUndefinedDeep<T>(value: T): T {
@@ -84,32 +103,29 @@ export const db = buildDb();
 export const googleProvider = new GoogleAuthProvider();
 
 // ---------------------------------------------------------------------------
-// Google Sign-In
-//
-// signInWithPopup causes "Database is closing/hidden" on mobile because the
-// browser hides the current page during the OAuth popup, which triggers
-// Firebase's background-tab detection and starts terminating Firestore.
-//
-// Fix: use signInWithRedirect on mobile (page navigates away then back,
-// Firestore reinitializes cleanly); keep popup on desktop where it works fine.
+// Google Sign-In — popup on ALL devices.
+// signInWithRedirect does NOT work here: authDomain (firebaseapp.com) differs from the
+// app domain (github.io), and modern Chrome/Safari partition third-party storage, so the
+// redirect result is lost and the user never gets signed in.
 // ---------------------------------------------------------------------------
-export const isMobileBrowser = (): boolean =>
-  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
 export async function loginWithGoogle(): Promise<User | null> {
   try {
-    if (isMobileBrowser()) {
-      // Redirect flow: will navigate away — caller should not await a User return.
-      // App.tsx handles the result via getRedirectResult in the auth listener.
-      await signInWithRedirect(auth, googleProvider);
-      return null; // navigation happens; this line is not reached in practice
-    }
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error: any) {
-    const msg = error?.message || String(error);
+    const code = String(error?.code || "");
+    const msg = String(error?.message || error);
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+      return null; // user closed the popup — not an error
+    }
+    if (code === "auth/popup-blocked") {
+      throw new Error("เบราว์เซอร์บล็อกหน้าต่างล็อกอิน — กรุณาอนุญาต Pop-up สำหรับเว็บนี้แล้วกดอีกครั้ง");
+    }
+    if (/closing|hidden|indexeddb/i.test(msg)) {
+      throw new Error("การเชื่อมต่อถูกขัดจังหวะ — กรุณากดเข้าสู่ระบบอีกครั้ง");
+    }
     console.error("Google sign in error:", error);
-    throw new Error(`ไม่สามารถเข้าสู่ระบบด้วย Google ได้: ${msg}`);
+    throw error;
   }
 }
 
@@ -155,25 +171,20 @@ export async function loadUserDataFromFirestore(userId: string): Promise<SystemD
   }
 }
 
-// Load the full user doc (systemData + updatedAt) for recency comparison
+// Load the full user doc (systemData + updatedAt).
+// Returns null ONLY when the doc truly doesn't exist. Read failures THROW, so callers
+// never mistake a network/DB error for "cloud is empty" and overwrite real cloud data.
 export async function loadUserDocFromFirestore(
   userId: string
 ): Promise<{ systemData: SystemData | null; updatedAt?: string } | null> {
-  try {
-    const userDocRef = doc(db, "users", userId);
-    const docSnap = await getDoc(userDocRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return {
-        systemData: (data.systemData as SystemData) ?? null,
-        updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error("Error loading user doc from Firestore:", error);
-    return null;
-  }
+  const userDocRef = doc(db, "users", userId);
+  const docSnap = await getDoc(userDocRef);
+  if (!docSnap.exists()) return null;
+  const data = docSnap.data();
+  return {
+    systemData: (data.systemData as SystemData) ?? null,
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
+  };
 }
 
 // Save User System Data to Firestore
