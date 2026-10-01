@@ -1,28 +1,72 @@
 import React, { useState } from "react";
 import { Activity, X, HeartPulse, Droplet, Scale, Save, Bluetooth, CheckCircle, RefreshCw, AlertCircle } from "lucide-react";
 import { HealthVital } from "../types";
+import { calculateBMI } from "../utils/thaiHelpers";
+import { VitalType, VITAL_TYPE_LABEL, typesOf, localDateTimeStr, parseVitalDate } from "../utils/vitals";
 
 interface AddVitalsModalProps {
   profileId: string;
   vitalToEdit?: HealthVital | null;
+  initialType?: VitalType;
+  lastHeight?: number; // prefill height from the latest record
   onClose: () => void;
   onSave: (vital: Omit<HealthVital, "id">) => void;
 }
 
+const TAB_META: Record<VitalType, { icon: React.ReactNode; on: string }> = {
+  bp: { icon: <HeartPulse className="w-4 h-4" />, on: "bg-rose-600 text-white" },
+  sugar: { icon: <Droplet className="w-4 h-4" />, on: "bg-purple-600 text-white" },
+  weight: { icon: <Scale className="w-4 h-4" />, on: "bg-teal-600 text-white" },
+};
+
+const BT_LABEL: Record<VitalType, string> = {
+  bp: "ดึงค่าจากเครื่องวัดความดันบลูทูธ",
+  sugar: "ดึงค่าจากเครื่องเจาะน้ำตาลบลูทูธ",
+  weight: "ดึงค่าจากเครื่องชั่งบลูทูธ",
+};
+
+const inputCls =
+  "w-full bg-white border border-slate-300 rounded-xl py-2 px-3 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none text-sm";
+
 export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
   profileId,
   vitalToEdit,
+  initialType: initialTypeProp,
+  lastHeight,
   onClose,
   onSave,
 }) => {
-  const [systolicBP, setSystolicBP] = useState<string>(String(vitalToEdit?.systolicBP ?? "120"));
-  const [diastolicBP, setDiastolicBP] = useState<string>(String(vitalToEdit?.diastolicBP ?? "80"));
-  const [heartRate, setHeartRate] = useState<string>(String(vitalToEdit?.heartRate ?? "72"));
-  const [bloodSugar, setBloodSugar] = useState<string>(String(vitalToEdit?.bloodSugar ?? "100"));
+  const initialType: VitalType = initialTypeProp ?? "bp";
+  const isEdit = !!vitalToEdit;
+  // When editing, only the types the record contains are editable (old combined records may have several)
+  const editTypes: VitalType[] = vitalToEdit ? typesOf(vitalToEdit) : [];
+  const availableTabs: VitalType[] = isEdit && editTypes.length > 0 ? editTypes : ["bp", "sugar", "weight"];
+  const [tab, setTab] = useState<VitalType>(
+    isEdit ? (editTypes.includes(initialType) ? initialType : editTypes[0] || "bp") : initialType
+  );
+
+  const str = (n?: number) => (n !== undefined && n !== null ? String(n) : "");
+  const [systolicBP, setSystolicBP] = useState<string>(str(vitalToEdit?.systolicBP));
+  const [diastolicBP, setDiastolicBP] = useState<string>(str(vitalToEdit?.diastolicBP));
+  const [heartRate, setHeartRate] = useState<string>(str(vitalToEdit?.heartRate));
+  const [bloodSugar, setBloodSugar] = useState<string>(str(vitalToEdit?.bloodSugar));
   const [sugarType, setSugarType] = useState<"fasting" | "after_meal" | "random">(vitalToEdit?.sugarType ?? "fasting");
-  const [weight, setWeight] = useState<string>(String(vitalToEdit?.weight ?? "68.0"));
-  const [height, setHeight] = useState<string>(String(vitalToEdit?.height ?? "168"));
+  const [weight, setWeight] = useState<string>(str(vitalToEdit?.weight));
+  const [height, setHeight] = useState<string>(str(vitalToEdit?.height ?? lastHeight));
   const [note, setNote] = useState<string>(vitalToEdit?.note ?? "");
+
+  // Date & time of the measurement (local). Editing keeps the stored value.
+  const initial = (() => {
+    if (vitalToEdit?.date) {
+      const [d, t] = vitalToEdit.date.trim().split(/[ T]/);
+      return { d: d || localDateTimeStr().slice(0, 10), t: (t || "").slice(0, 5) || "00:00" };
+    }
+    const now = localDateTimeStr();
+    return { d: now.slice(0, 10), t: now.slice(11, 16) };
+  })();
+  const [dateStr, setDateStr] = useState<string>(initial.d);
+  const [timeStr, setTimeStr] = useState<string>(initial.t);
+  const [formError, setFormError] = useState<string>("");
 
   // Bluetooth scanning state
   const [isBtConnecting, setIsBtConnecting] = useState<boolean>(false);
@@ -188,8 +232,6 @@ export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
         setBtErrorAdvice(
           "เบราว์เซอร์นี้ไม่รองรับ Web Bluetooth (เช่น Safari iOS) - แนะนำให้ใช้ Google Chrome หรือเปิดผ่านแอปมือถือ MediTrack Pro"
         );
-        // Fallback demo reading
-        simulateDemoReading(deviceType);
       }
     } catch (err: any) {
       console.log("Bluetooth request error:", err);
@@ -201,58 +243,89 @@ export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
         setBtErrorAdvice(
           "⚠️ เบราว์เซอร์บล็อกการค้นหาบลูทูธเนื่องจากอยู่ในหน้ากรอบพรีวิว (iFrame) กรุณากดปุ่ม 'เปิดในหน้าต่างใหม่ (Open in New Tab)' ที่แถบด้านบน หรือใช้ผ่านแอปมือถือที่ติดตั้งไว้ จะค้นหาบลูทูธได้ 100%"
         );
-        simulateDemoReading(deviceType);
       } else {
         setBtErrorAdvice(
-          `ไม่พบอุปกรณ์วัดความดันบลูทูธใกล้เคียง: ${err.message || "กรุณาเปิดบลูทูธที่เครื่องวัดความดันและลองอีกครั้ง"}`
+          `เชื่อมต่อบลูทูธไม่สำเร็จ: ${err.message || "กรุณาเปิดบลูทูธที่อุปกรณ์แล้วลองอีกครั้ง"} — กรอกค่าเองได้`
         );
-        simulateDemoReading(deviceType);
       }
     } finally {
       setIsBtConnecting(false);
     }
   };
 
-  const simulateDemoReading = (deviceType: "bp" | "sugar" | "scale") => {
-    if (deviceType === "bp") {
-      const sys = Math.floor(118 + Math.random() * 10);
-      const dia = Math.floor(76 + Math.random() * 8);
-      const hr = Math.floor(70 + Math.random() * 10);
-      setSystolicBP(String(sys));
-      setDiastolicBP(String(dia));
-      setHeartRate(String(hr));
-      setBtStatus(`[ทดสอบสาธิต] ดึงค่าความดันสำเร็จ: ${sys}/${dia} mmHg (ชีพจร ${hr} bpm)`);
-      setConnectedDevice("เครื่องวัดความดัน Omron / Allwell BLE (Demo)");
-    } else if (deviceType === "sugar") {
-      const sugar = Math.floor(98 + Math.random() * 20);
-      setBloodSugar(String(sugar));
-      setBtStatus(`[ทดสอบสาธิต] ดึงค่าน้ำตาลสำเร็จ: ${sugar} mg/dL`);
-      setConnectedDevice("เครื่องเจาะน้ำตาล Glucose Meter (Demo)");
-    } else if (deviceType === "scale") {
-      const w = (67 + Math.random() * 4).toFixed(1);
-      setWeight(String(w));
-      setBtStatus(`[ทดสอบสาธิต] ดึงค่าน้ำหนักสำเร็จ: ${w} kg`);
-      setConnectedDevice("เครื่องชั่งน้ำหนัก Smart Scale (Demo)");
+  const num = (s: string) => (s.trim() === "" ? undefined : Number(s));
+  const inRange = (v: number | undefined, lo: number, hi: number) => v !== undefined && !isNaN(v) && v >= lo && v <= hi;
+
+  const validate = (t: VitalType): string => {
+    if (t === "bp") {
+      const sys = num(systolicBP), dia = num(diastolicBP), hr = num(heartRate);
+      if (!inRange(sys, 50, 260)) return "กรอกความดันตัวบน (50–260 mmHg)";
+      if (!inRange(dia, 30, 200)) return "กรอกความดันตัวล่าง (30–200 mmHg)";
+      if ((sys as number) <= (dia as number)) return "ความดันตัวบนต้องมากกว่าตัวล่าง";
+      if (hr !== undefined && !inRange(hr, 30, 220)) return "ชีพจรควรอยู่ระหว่าง 30–220 bpm";
+    } else if (t === "sugar") {
+      if (!inRange(num(bloodSugar), 20, 600)) return "กรอกค่าน้ำตาล (20–600 mg/dL)";
+    } else {
+      if (!inRange(num(weight), 10, 300)) return "กรอกน้ำหนัก (10–300 กก.)";
+      const h = num(height);
+      if (h !== undefined && !inRange(h, 50, 250)) return "ส่วนสูงควรอยู่ระหว่าง 50–250 ซม.";
     }
+    return "";
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError("");
 
-    const nowStr = new Date().toISOString().replace("T", " ").substring(0, 16);
+    // New record: only the active tab. Edit: every type the record contains.
+    const typesToSave: VitalType[] = isEdit ? availableTabs : [tab];
+    for (const t of typesToSave) {
+      const err = validate(t);
+      if (err) {
+        setTab(t);
+        setFormError(err);
+        return;
+      }
+    }
 
-    onSave({
+    if (!dateStr || !/^\d{2}:\d{2}$/.test(timeStr)) {
+      setFormError("กรอกวันที่และเวลาที่วัด");
+      return;
+    }
+    const when = `${dateStr} ${timeStr}`;
+    const whenDate = parseVitalDate(when);
+    if (!whenDate || whenDate.getTime() > Date.now() + 5 * 60 * 1000) {
+      setFormError("วันและเวลาที่วัดต้องไม่เป็นอนาคต");
+      return;
+    }
+
+    const record: Omit<HealthVital, "id"> = {
       profileId,
-      date: nowStr,
-      systolicBP: systolicBP ? Number(systolicBP) : undefined,
-      diastolicBP: diastolicBP ? Number(diastolicBP) : undefined,
-      heartRate: heartRate ? Number(heartRate) : undefined,
-      bloodSugar: bloodSugar ? Number(bloodSugar) : undefined,
-      sugarType,
-      weight: weight ? Number(weight) : undefined,
-      height: height ? Number(height) : undefined,
-      note: connectedDevice ? `[Bluetooth Allwell Sync: ${connectedDevice}] ${note.trim()}`.trim() : note.trim(),
-    });
+      date: when,
+      note: connectedDevice ? `[Bluetooth: ${connectedDevice}] ${note.trim()}`.trim() : note.trim(),
+    };
+    if (typesToSave.includes("bp")) {
+      record.systolicBP = num(systolicBP);
+      record.diastolicBP = num(diastolicBP);
+      record.heartRate = num(heartRate);
+    }
+    if (typesToSave.includes("sugar")) {
+      record.bloodSugar = num(bloodSugar);
+      record.sugarType = sugarType;
+    }
+    if (typesToSave.includes("weight")) {
+      record.weight = num(weight);
+      record.height = num(height);
+    }
+    onSave(record);
+  };
+
+  const bmiPreview = calculateBMI(num(weight), num(height));
+  const switchTab = (t: VitalType) => {
+    setTab(t);
+    setFormError("");
+    setBtStatus("");
+    setBtErrorAdvice("");
   };
 
   return (
@@ -260,7 +333,8 @@ export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
       <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 relative border border-slate-100 animate-in fade-in zoom-in duration-200 my-8">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+          className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+          aria-label="ปิด"
         >
           <X className="w-5 h-5" />
         </button>
@@ -270,259 +344,164 @@ export const AddVitalsModal: React.FC<AddVitalsModalProps> = ({
             <Activity className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-slate-900">บันทึกค่าสุขภาพประจำวัน</h3>
-            <p className="text-xs text-slate-500">
-              ความดันโลหิต ค่าน้ำตาลปลายนิ้ว ชีพจร และน้ำหนักตัว
-            </p>
+            <h3 className="text-xl font-bold text-slate-900">{isEdit ? "แก้ไขค่าสุขภาพ" : "บันทึกค่าสุขภาพ"}</h3>
+            <p className="text-xs text-slate-500">เลือกประเภทที่ต้องการบันทึก ระบบจะบันทึกเฉพาะค่าประเภทนั้น</p>
           </div>
         </div>
 
-        {/* Bluetooth Device Pairing Panel (Allwell / Medical BLE) */}
-        <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-2xl mb-5 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center">
-                <Bluetooth className="w-3.5 h-3.5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-blue-900">เชื่อมต่อบลูทูธวัดอัตโนมัติ (Allwell Sync)</span>
-                <p className="text-[10px] text-blue-700">เลือกประเภทอุปกรณ์เพื่อดึงค่าผลวัดทันที</p>
-              </div>
+        {/* Type tabs */}
+        {availableTabs.length > 1 && (
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl mb-4">
+            {availableTabs.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => switchTab(t)}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  tab === t ? TAB_META[t].on : "text-slate-600 hover:bg-white"
+                }`}
+              >
+                {TAB_META[t].icon}
+                <span>{VITAL_TYPE_LABEL[t]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {/* Date & time */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">วันที่วัด</label>
+              <input type="date" value={dateStr} max={localDateTimeStr().slice(0, 10)} onChange={(e) => setDateStr(e.target.value)} className={inputCls} />
             </div>
-            {connectedDevice && (
-              <span className="text-[10px] font-bold bg-green-100 text-green-800 border border-green-300 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <CheckCircle className="w-3 h-3 text-green-600" /> เชื่อมต่อแล้ว
-              </span>
-            )}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">เวลา</label>
+              <input type="time" value={timeStr} onChange={(e) => setTimeStr(e.target.value)} className={inputCls} />
+            </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              disabled={isBtConnecting}
-              onClick={() => handleBluetoothPairing("bp")}
-              className="px-2.5 py-1.5 bg-white hover:bg-blue-100/60 border border-blue-200 rounded-xl text-[11px] font-bold text-slate-800 flex items-center justify-center gap-1 transition-all shadow-2xs active:scale-95 cursor-pointer disabled:opacity-50"
-            >
-              <HeartPulse className="w-3.5 h-3.5 text-rose-500" />
-              <span>เครื่องวัดความดัน</span>
-            </button>
-            <button
-              type="button"
-              disabled={isBtConnecting}
-              onClick={() => handleBluetoothPairing("sugar")}
-              className="px-2.5 py-1.5 bg-white hover:bg-purple-100/60 border border-purple-200 rounded-xl text-[11px] font-bold text-slate-800 flex items-center justify-center gap-1 transition-all shadow-2xs active:scale-95 cursor-pointer disabled:opacity-50"
-            >
-              <Droplet className="w-3.5 h-3.5 text-purple-600" />
-              <span>เครื่องเจาะน้ำตาล</span>
-            </button>
-            <button
-              type="button"
-              disabled={isBtConnecting}
-              onClick={() => handleBluetoothPairing("scale")}
-              className="px-2.5 py-1.5 bg-white hover:bg-teal-100/60 border border-teal-200 rounded-xl text-[11px] font-bold text-slate-800 flex items-center justify-center gap-1 transition-all shadow-2xs active:scale-95 cursor-pointer disabled:opacity-50"
-            >
-              <Scale className="w-3.5 h-3.5 text-teal-600" />
-              <span>เครื่องชั่ง/BMI</span>
-            </button>
-          </div>
-
-          {btStatus && (
-            <div className="text-[10px] font-bold text-blue-900 bg-white/80 p-2 rounded-lg border border-blue-100 flex items-center gap-1.5 animate-in fade-in">
-              {isBtConnecting ? (
-                <RefreshCw className="w-3 h-3 text-blue-600 animate-spin" />
-              ) : (
-                <CheckCircle className="w-3 h-3 text-green-600" />
+          {/* Bluetooth — current tab's device only (new records) */}
+          {!isEdit && (
+            <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-2xl space-y-2">
+              <button
+                type="button"
+                disabled={isBtConnecting}
+                onClick={() => handleBluetoothPairing(tab === "weight" ? "scale" : tab)}
+                className="w-full px-3 py-2 bg-white hover:bg-blue-100/60 border border-blue-200 rounded-xl text-xs font-bold text-blue-900 flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+              >
+                {isBtConnecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Bluetooth className="w-4 h-4 text-blue-600" />}
+                <span>{BT_LABEL[tab]}</span>
+              </button>
+              {btStatus && (
+                <div className="text-[11px] font-bold text-blue-900 bg-white/80 p-2 rounded-lg border border-blue-100 flex items-center gap-1.5">
+                  {isBtConnecting ? <RefreshCw className="w-3 h-3 text-blue-600 animate-spin" /> : <CheckCircle className="w-3 h-3 text-green-600" />}
+                  <span>{btStatus}</span>
+                </div>
               )}
-              <span>{btStatus}</span>
+              {btErrorAdvice && (
+                <div className="text-[11px] font-bold text-amber-900 bg-amber-50 p-2.5 rounded-xl border border-amber-200 flex items-start gap-2 leading-relaxed">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>{btErrorAdvice}</span>
+                </div>
+              )}
             </div>
           )}
 
-          {btErrorAdvice && (
-            <div className="text-[11px] font-bold text-amber-900 bg-amber-50 p-3 rounded-xl border border-amber-200 flex items-start gap-2 animate-in fade-in leading-relaxed">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <span>{btErrorAdvice}</span>
-                <div className="mt-1.5">
-                  <a
-                    href={window.location.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-block px-2.5 py-1 bg-amber-700 hover:bg-amber-800 text-white text-[10px] rounded-lg shadow-2xs font-extrabold"
-                  >
-                    ↗️ คลิกที่นี่เพื่อเปิดในหน้าต่างใหม่ (Open in New Tab)
-                  </a>
+          {/* Blood pressure */}
+          {tab === "bp" && (
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+              <div className="flex items-center gap-2 mb-3 text-xs font-extrabold text-slate-800">
+                <HeartPulse className="w-4 h-4 text-rose-500" />
+                <span>ความดันโลหิต และชีพจร</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">ตัวบน (SYS) *</label>
+                  <input type="number" inputMode="numeric" placeholder="mmHg" value={systolicBP} onChange={(e) => setSystolicBP(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">ตัวล่าง (DIA) *</label>
+                  <input type="number" inputMode="numeric" placeholder="mmHg" value={diastolicBP} onChange={(e) => setDiastolicBP(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">ชีพจร</label>
+                  <input type="number" inputMode="numeric" placeholder="bpm" value={heartRate} onChange={(e) => setHeartRate(e.target.value)} className={inputCls} />
                 </div>
               </div>
             </div>
           )}
-        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Blood Pressure Section */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-2 mb-3 text-xs font-extrabold text-slate-800">
-              <HeartPulse className="w-4 h-4 text-rose-500" />
-              <span>ความดันโลหิต & ชีพจร</span>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  ตัวบน (SYS)
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    placeholder="120"
-                    value={systolicBP}
-                    onChange={(e) => setSystolicBP(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl py-2 px-2.5 font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none text-sm"
-                  />
-                  <span className="absolute right-2 top-2.5 text-[10px] text-slate-400">
-                    mmHg
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  ตัวล่าง (DIA)
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    placeholder="80"
-                    value={diastolicBP}
-                    onChange={(e) => setDiastolicBP(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl py-2 px-2.5 font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none text-sm"
-                  />
-                  <span className="absolute right-2 top-2.5 text-[10px] text-slate-400">
-                    mmHg
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  ชีพจร (Pulse)
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    placeholder="72"
-                    value={heartRate}
-                    onChange={(e) => setHeartRate(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl py-2 px-2.5 font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none text-sm"
-                  />
-                  <span className="absolute right-2 top-2.5 text-[10px] text-slate-400">
-                    bpm
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Blood Sugar Section */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800">
+          {/* Blood sugar */}
+          {tab === "sugar" && (
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+              <div className="flex items-center gap-2 mb-3 text-xs font-extrabold text-slate-800">
                 <Droplet className="w-4 h-4 text-purple-600" />
                 <span>ระดับน้ำตาลปลายนิ้ว</span>
               </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  ค่าน้ำตาล (mg/dL)
-                </label>
-                <input
-                  type="number"
-                  placeholder="เช่น 110"
-                  value={bloodSugar}
-                  onChange={(e) => setBloodSugar(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl py-2 px-3 font-bold text-purple-900 focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">ค่าน้ำตาล (mg/dL) *</label>
+                  <input type="number" inputMode="numeric" placeholder="mg/dL" value={bloodSugar} onChange={(e) => setBloodSugar(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">สภาวะก่อน/หลังเจาะ</label>
+                  <select value={sugarType} onChange={(e) => setSugarType(e.target.value as any)} className={inputCls}>
+                    <option value="fasting">งดอาหารตื่นนอน (Fasting)</option>
+                    <option value="after_meal">หลังอาหาร 2 ชม.</option>
+                    <option value="random">วัดแบบสุ่มระหว่างวัน</option>
+                  </select>
+                </div>
               </div>
+            </div>
+          )}
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  สภาวะก่อน/หลังเจาะ
-                </label>
-                <select
-                  value={sugarType}
-                  onChange={(e) => setSugarType(e.target.value as any)}
-                  className="w-full bg-white border border-slate-300 rounded-xl py-2 px-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                >
-                  <option value="fasting">งดอาหารตื่นนอน (Fasting)</option>
-                  <option value="after_meal">หลังอาหาร 2 ชม.</option>
-                  <option value="random">วัดแบบสุ่มระหว่างวัน</option>
-                </select>
+          {/* Weight & height */}
+          {tab === "weight" && (
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+              <div className="flex items-center gap-2 mb-3 text-xs font-extrabold text-slate-800">
+                <Scale className="w-4 h-4 text-teal-600" />
+                <span>น้ำหนัก และส่วนสูง</span>
               </div>
-            </div>
-          </div>
-
-          {/* Weight & Height Section */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-2 mb-3 text-xs font-extrabold text-slate-800">
-              <Scale className="w-4 h-4 text-teal-600" />
-              <span>น้ำหนัก & ส่วนสูง</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  น้ำหนัก (กก.)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="68.5"
-                  value={weight}
-                  onChange={(e) => setWeight(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl py-2 px-3 font-bold text-teal-900 focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">น้ำหนัก (กก.) *</label>
+                  <input type="number" inputMode="decimal" step="0.1" placeholder="กก." value={weight} onChange={(e) => setWeight(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">ส่วนสูง (ซม.)</label>
+                  <input type="number" inputMode="numeric" placeholder="ซม." value={height} onChange={(e) => setHeight(e.target.value)} className={inputCls} />
+                </div>
               </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  ส่วนสูง (ซม.)
-                </label>
-                <input
-                  type="number"
-                  placeholder="168"
-                  value={height}
-                  onChange={(e) => setHeight(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl py-2 px-3 font-bold text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm"
-                />
-              </div>
+              {!isEdit && lastHeight && <p className="text-[11px] text-slate-400 mt-1.5">ส่วนสูงเติมจากครั้งล่าสุดให้อัตโนมัติ</p>}
+              <p className="text-xs font-bold text-teal-700 mt-2">
+                BMI: {bmiPreview ? `${bmiPreview.bmi} · ${bmiPreview.text}` : "-"}
+              </p>
             </div>
-          </div>
+          )}
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              โน้ตหรืออาการผิดปกติเพิ่มเติม
-            </label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">โน้ตหรืออาการผิดปกติเพิ่มเติม</label>
             <input
               type="text"
-              placeholder="เช่น มีอาการเวียนศีรษะเล็กน้อยหลังทานอาหาร"
+              placeholder={tab === "bp" ? "เช่น วัดหลังตื่นนอน" : tab === "sugar" ? "เช่น หลังอาหารเช้า" : "เช่น ชั่งก่อนอาหารเช้า"}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 text-sm text-slate-900 focus:ring-2 focus:ring-rose-500 focus:outline-none"
+              className="w-full bg-white border border-slate-300 rounded-2xl py-2.5 px-3 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             />
           </div>
 
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-all"
-            >
+          {formError && (
+            <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{formError}</p>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-all cursor-pointer">
               ยกเลิก
             </button>
-            <button
-              type="submit"
-              className="flex-1 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-emerald-400 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-1.5"
-            >
+            <button type="submit" className="flex-1 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-emerald-400 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer">
               <Save className="w-4 h-4" />
-              <span>บันทึกผลสุขภาพ</span>
+              <span>{isEdit ? "บันทึกการแก้ไข" : `บันทึก${VITAL_TYPE_LABEL[tab]}`}</span>
             </button>
           </div>
         </form>

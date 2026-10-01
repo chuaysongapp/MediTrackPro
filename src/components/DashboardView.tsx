@@ -38,6 +38,7 @@ import {
   localDateStr,
 } from "../utils/thaiHelpers";
 import { summarizeDay } from "../utils/intakeSummary";
+import { VitalType, sortVitalsDesc, latestOfType, latestHeight, hasType, formatVitalWhen } from "../utils/vitals";
 
 interface DashboardViewProps {
   activeProfile: UserProfile;
@@ -47,7 +48,7 @@ interface DashboardViewProps {
   appointments: DoctorAppointment[];
   lineConfig: LineConfig;
   onToggleIntake: (medicineId: string, meal: MealTime, status: "taken" | "skipped", date?: string) => void;
-  onOpenAddVitals: () => void;
+  onOpenAddVitals: (type?: VitalType) => void;
   onEditVital?: (v: HealthVital) => void;
   onDeleteVital?: (id: string) => void;
   onOpenRefill: (med: Medicine) => void;
@@ -89,15 +90,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
 
   // Latest vital reading
-  const profileVitals = vitals
-    .filter((v) => v.profileId === activeProfile.id)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const profileVitals = sortVitalsDesc(vitals.filter((v) => v.profileId === activeProfile.id));
   const latestVital = profileVitals[0] || null;
+  // Latest value of EACH type (records are saved separately per type)
+  const latestBP = latestOfType(profileVitals, "bp");
+  const latestSugar = latestOfType(profileVitals, "sugar");
+  const latestWeight = latestOfType(profileVitals, "weight");
+  const bmiHeight = latestWeight?.height ?? latestHeight(profileVitals);
+  const bpTodayCount = profileVitals.filter((v) => hasType(v, "bp") && (v.date || "").slice(0, 10) === todayStr).length;
 
   // Evaluate latest vitals
-  const bpEval = latestVital ? evaluateBP(latestVital.systolicBP, latestVital.diastolicBP) : null;
-  const sugarEval = latestVital ? evaluateSugar(latestVital.bloodSugar, latestVital.sugarType) : null;
-  const bmiEval = latestVital ? calculateBMI(latestVital.weight, latestVital.height) : null;
+  const bpEval = latestBP ? evaluateBP(latestBP.systolicBP, latestBP.diastolicBP) : null;
+  const sugarEval = latestSugar ? evaluateSugar(latestSugar.bloodSugar, latestSugar.sugarType) : null;
+  const bmiEval = latestWeight ? calculateBMI(latestWeight.weight, bmiHeight) : null;
 
   // Upcoming appointments
   const upcomingAppts = appointments
@@ -125,7 +130,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 ------------------------
 💊 ความสม่ำเสมอในการทานยา: ${todayAdherencePct}% (${takenTodayDoses}/${totalTodayDoses} รายการ · ครบ ${todaySummary.mealsComplete}/${todaySummary.mealsScheduled} มื้อ)
 ${lowStockMeds.length > 0 ? `⚠️ ยาใกล้หมดคลัง (${lowStockMeds.length} รายการ): ${lowStockMeds.map((m) => m.name).join(", ")}` : "✅ คลังยาเพียงพอปกติ"}
-${latestVital ? `🩸 ค่าความดันล่าสุด: ${latestVital.systolicBP}/${latestVital.diastolicBP} mmHg\n💉 ค่าน้ำตาล: ${latestVital.bloodSugar} mg/dL` : ""}`;
+${latestBP ? `🩸 ค่าความดันล่าสุด: ${latestBP.systolicBP}/${latestBP.diastolicBP} mmHg (${formatVitalWhen(latestBP.date)})` : ""}
+${latestSugar ? `💉 ค่าน้ำตาลล่าสุด: ${latestSugar.bloodSugar} mg/dL (${formatVitalWhen(latestSugar.date)})` : ""}`;
 
     onSendLineNotify(text);
   };
@@ -253,10 +259,10 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
               </h3>
               <ul className="text-xs space-y-0.5 mt-1 text-red-800 font-medium">
                 {bpEval?.isWarning && (
-                  <li>• ความดันโลหิตล่าสุด: {latestVital?.systolicBP}/{latestVital?.diastolicBP} mmHg ({bpEval.status})</li>
+                  <li>• ความดันโลหิตล่าสุด: {latestBP?.systolicBP}/{latestBP?.diastolicBP} mmHg ({bpEval.status})</li>
                 )}
                 {sugarEval?.isWarning && (
-                  <li>• ค่าน้ำตาลปลายนิ้วล่าสุด: {latestVital?.bloodSugar} mg/dL ({sugarEval.status})</li>
+                  <li>• ค่าน้ำตาลปลายนิ้วล่าสุด: {latestSugar?.bloodSugar} mg/dL ({sugarEval.status})</li>
                 )}
               </ul>
             </div>
@@ -420,7 +426,7 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
                   </button>
                 )}
                 <button
-                  onClick={onOpenAddVitals}
+                  onClick={() => onOpenAddVitals("bp")}
                   className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold rounded border border-rose-200 transition-all flex items-center gap-1 cursor-pointer"
                 >
                   <PlusCircle className="w-3 h-3" />
@@ -434,11 +440,13 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
                 {/* Vital history list — edit/delete on any record */}
                 {profileVitals.slice(0, 3).map((v, idx) => (
                   <div key={v.id} className={`flex items-center justify-between text-xs px-2 py-1 rounded-lg ${idx === 0 ? "bg-emerald-50" : "bg-slate-50"}`}>
-                    <span className="text-slate-500 font-semibold">{formatThaiDateShort(v.date)}</span>
+                    <span className="text-slate-500 font-semibold shrink-0">{formatVitalWhen(v.date)}</span>
                     <span className="text-slate-700 font-bold">
-                      {v.systolicBP && v.diastolicBP ? `${v.systolicBP}/${v.diastolicBP} mmHg` : ""}
-                      {v.bloodSugar ? ` · ${v.bloodSugar} mg/dL` : ""}
-                      {v.weight ? ` · ${v.weight} kg` : ""}
+                      {[
+                        v.systolicBP && v.diastolicBP ? `${v.systolicBP}/${v.diastolicBP} mmHg` : "",
+                        v.bloodSugar ? `น้ำตาล ${v.bloodSugar}` : "",
+                        v.weight ? `${v.weight} kg` : "",
+                      ].filter(Boolean).join(" · ")}
                     </span>
                     <div className="flex gap-2">
                       {onEditVital && (
@@ -450,69 +458,73 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
                     </div>
                   </div>
                 ))}
+                {/* Blood Pressure Card */}
                 <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex justify-between">
-                    <span>ความดันโลหิต</span>
-                    <span className="text-slate-400 font-normal">{formatThaiDateShort(latestVital.date)}</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ความดันโลหิต</span>
+                    <button onClick={() => onOpenAddVitals("bp")} className="px-2 py-0.5 rounded border border-rose-200 bg-white text-rose-700 text-[10px] font-bold flex items-center gap-1 hover:bg-rose-50 cursor-pointer">
+                      <PlusCircle className="w-3 h-3" /> บันทึก
+                    </button>
                   </div>
                   <div className="flex items-baseline gap-2">
                     <span className="text-2xl font-bold text-slate-800">
-                      {latestVital.systolicBP || "-"}/{latestVital.diastolicBP || "-"}
+                      {latestBP ? `${latestBP.systolicBP}/${latestBP.diastolicBP}` : "-"}
                     </span>
-                    <span className="text-xs text-slate-400">mmHg</span>
+                    <span className="text-xs text-slate-400">mmHg{latestBP?.heartRate ? ` · ชีพจร ${latestBP.heartRate}` : ""}</span>
                   </div>
                   {bpEval && (
-                    <div className="mt-1 flex items-center gap-1 text-[10px] font-bold">
-                      <span className={bpEval.isWarning ? "text-red-600" : "text-green-600"}>
-                        ● {bpEval.status}
-                      </span>
+                    <div className="mt-1 text-[10px] font-bold">
+                      <span className={bpEval.isWarning ? "text-red-600" : "text-green-600"}>● {bpEval.status}</span>
                     </div>
                   )}
+                  <div className="mt-1 text-[10px] text-slate-400">
+                    {latestBP ? formatVitalWhen(latestBP.date) : "ยังไม่มีบันทึก"}
+                    {bpTodayCount > 0 && ` · วันนี้วัดแล้ว ${bpTodayCount} ครั้ง`}
+                  </div>
                 </div>
 
                 {/* Blood Sugar Card */}
                 <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex justify-between">
-                    <span>น้ำตาลปลายนิ้ว</span>
-                    <span className="text-slate-400 font-normal">{formatThaiDateShort(latestVital.date)}</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">น้ำตาลปลายนิ้ว</span>
+                    <button onClick={() => onOpenAddVitals("sugar")} className="px-2 py-0.5 rounded border border-purple-200 bg-white text-purple-700 text-[10px] font-bold flex items-center gap-1 hover:bg-purple-50 cursor-pointer">
+                      <PlusCircle className="w-3 h-3" /> บันทึก
+                    </button>
                   </div>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-slate-800">
-                      {latestVital.bloodSugar || "-"}
+                    <span className="text-2xl font-bold text-slate-800">{latestSugar?.bloodSugar ?? "-"}</span>
+                    <span className="text-xs text-slate-400">
+                      mg/dL
+                      {latestSugar?.sugarType === "fasting" ? " · งดอาหาร" : latestSugar?.sugarType === "after_meal" ? " · หลังอาหาร" : latestSugar ? " · สุ่ม" : ""}
                     </span>
-                    <span className="text-xs text-slate-400">mg/dL</span>
                   </div>
                   {sugarEval && (
-                    <div className="mt-1 flex items-center gap-1 text-[10px] font-bold">
-                      <span className={sugarEval.isWarning ? "text-red-600" : "text-green-600"}>
-                        ● {sugarEval.status}
-                      </span>
+                    <div className="mt-1 text-[10px] font-bold">
+                      <span className={sugarEval.isWarning ? "text-red-600" : "text-green-600"}>● {sugarEval.status}</span>
                     </div>
                   )}
+                  <div className="mt-1 text-[10px] text-slate-400">{latestSugar ? formatVitalWhen(latestSugar.date) : "ยังไม่มีบันทึก"}</div>
                 </div>
 
                 {/* Weight & BMI Card */}
                 <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex justify-between">
-                    <span>น้ำหนักตัว & BMI</span>
-                    <span className="text-slate-400 font-normal">{formatThaiDateShort(latestVital.date)}</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">น้ำหนักตัว & BMI</span>
+                    <button onClick={() => onOpenAddVitals("weight")} className="px-2 py-0.5 rounded border border-teal-200 bg-white text-teal-700 text-[10px] font-bold flex items-center gap-1 hover:bg-teal-50 cursor-pointer">
+                      <PlusCircle className="w-3 h-3" /> บันทึก
+                    </button>
                   </div>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-slate-800">
-                      {latestVital.weight || "-"}
-                    </span>
+                    <span className="text-2xl font-bold text-slate-800">{latestWeight?.weight ?? "-"}</span>
                     <span className="text-xs text-slate-400">kg</span>
-                    {bmiEval && (
-                      <span className="text-xs font-bold text-blue-600 ml-auto">
-                        BMI: {bmiEval.bmi}
-                      </span>
-                    )}
+                    {bmiEval && <span className="text-xs font-bold text-blue-600 ml-auto">BMI: {bmiEval.bmi}</span>}
                   </div>
                   {bmiEval && (
                     <div className="mt-1 text-[10px] font-bold text-blue-600">
                       <span>● {bmiEval.text}</span>
                     </div>
                   )}
+                  <div className="mt-1 text-[10px] text-slate-400">{latestWeight ? formatVitalWhen(latestWeight.date) : "ยังไม่มีบันทึก"}</div>
                 </div>
               </div>
             ) : (
@@ -520,7 +532,7 @@ ${latestVital ? `🩸 ค่าความดันล่าสุด: ${latest
                 ยังไม่มีการบันทึกค่าสัญญาณชีพ
                 <br />
                 <button
-                  onClick={onOpenAddVitals}
+                  onClick={() => onOpenAddVitals("bp")}
                   className="mt-1.5 text-blue-600 font-bold underline cursor-pointer"
                 >
                   คลิกเพื่อบันทึกครั้งแรก

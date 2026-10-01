@@ -19,7 +19,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { UserProfile, HealthVital, Medicine, IntakeLog } from "../types";
-import { formatThaiDateShort, evaluateBP, evaluateSugar, calculateBMI, FOOD_RELATION_TH, MEAL_NAMES_TH } from "../utils/thaiHelpers";
+import { formatThaiDateShort, evaluateBP, evaluateSugar, calculateBMI, FOOD_RELATION_TH, MEAL_NAMES_TH, localDateStr } from "../utils/thaiHelpers";
+import { vitalTime, vitalChartLabel, latestHeight as latestKnownHeight } from "../utils/vitals";
 
 interface DoctorReportModalProps {
   activeProfile: UserProfile;
@@ -41,10 +42,10 @@ export const DoctorReportModal: React.FC<DoctorReportModalProps> = ({
   const [startDate, setStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 14);
-    return d.toISOString().split("T")[0];
+    return localDateStr(d);
   });
   const [endDate, setEndDate] = useState<string>(() => {
-    return new Date().toISOString().split("T")[0];
+    return localDateStr();
   });
 
   // Include Options
@@ -66,8 +67,8 @@ export const DoctorReportModal: React.FC<DoctorReportModalProps> = ({
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - days);
-    setStartDate(start.toISOString().split("T")[0]);
-    setEndDate(end.toISOString().split("T")[0]);
+    setStartDate(localDateStr(start));
+    setEndDate(localDateStr(end));
   };
 
   // Filter vitals by profile and date range
@@ -75,10 +76,10 @@ export const DoctorReportModal: React.FC<DoctorReportModalProps> = ({
     return vitals
       .filter((v) => {
         if (v.profileId !== activeProfile.id) return false;
-        const vDate = v.date.split(" ")[0]; // YYYY-MM-DD
+        const vDate = (v.date || "").slice(0, 10); // YYYY-MM-DD
         return vDate >= startDate && vDate <= endDate;
       })
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .sort((a, b) => vitalTime(a) - vitalTime(b));
   }, [vitals, activeProfile.id, startDate, endDate]);
 
   // Filter intake logs by profile and date range
@@ -110,7 +111,9 @@ export const DoctorReportModal: React.FC<DoctorReportModalProps> = ({
 
   const weightReadings = filteredVitals.filter((v) => v.weight);
   const latestWeight = weightReadings.length > 0 ? weightReadings[weightReadings.length - 1].weight : null;
-  const latestHeight = weightReadings.length > 0 ? weightReadings[weightReadings.length - 1].height : undefined;
+  const latestHeight =
+    (weightReadings.length > 0 ? weightReadings[weightReadings.length - 1].height : undefined) ??
+    latestKnownHeight(vitals.filter((v) => v.profileId === activeProfile.id));
   const bmiEval = latestWeight ? calculateBMI(latestWeight, latestHeight) : null;
 
   // Medication Adherence
@@ -407,7 +410,7 @@ export const DoctorReportModal: React.FC<DoctorReportModalProps> = ({
             </div>
 
             <div className="text-right text-xs text-slate-500 shrink-0">
-              <p className="font-bold text-slate-800">วันที่ออกรายงาน: {formatThaiDateShort(new Date().toISOString().split("T")[0])}</p>
+              <p className="font-bold text-slate-800">วันที่ออกรายงาน: {formatThaiDateShort(localDateStr())}</p>
               <p>ช่วงข้อมูล: {formatThaiDateShort(startDate)} - {formatThaiDateShort(endDate)}</p>
             </div>
           </div>
@@ -532,7 +535,7 @@ export const DoctorReportModal: React.FC<DoctorReportModalProps> = ({
 
                       return (
                         <tr key={v.id} className="hover:bg-slate-50/80">
-                          <td className="p-2.5 font-bold text-slate-900">{formatThaiDateShort(v.date)}</td>
+                          <td className="p-2.5 font-bold text-slate-900">{vitalChartLabel(v.date)}</td>
                           {includeBP && (
                             <td className="p-2.5">
                               {v.systolicBP ? (

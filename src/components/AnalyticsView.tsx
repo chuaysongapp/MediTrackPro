@@ -31,6 +31,7 @@ import {
 } from "recharts";
 import { Medicine, HealthVital, IntakeLog, UserProfile, RefillTransaction, MedicalRecord } from "../types";
 import { formatThaiDateShort, evaluateBP, evaluateSugar, calculateBMI } from "../utils/thaiHelpers";
+import { sortVitalsDesc, latestOfType, latestHeight, hasType, vitalChartLabel } from "../utils/vitals";
 
 interface AnalyticsViewProps {
   activeProfile: UserProfile;
@@ -57,30 +58,26 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   const profileMeds = medicines.filter((m) => m.profileId === activeProfile.id);
 
-  // Vitals sorted chronologically for line charts
-  const profileVitals = vitals
-    .filter((v) => v.profileId === activeProfile.id)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  // Vitals sorted chronologically for line charts (records are saved per type)
+  const profileVitals = sortVitalsDesc(vitals.filter((v) => v.profileId === activeProfile.id)).reverse();
 
-  // Prepare Chart Data for Blood Pressure
-  const bpChartData = profileVitals.map((v) => ({
-    date: formatThaiDateShort(v.date),
-    systolic: v.systolicBP || 0,
-    diastolic: v.diastolicBP || 0,
-    heartRate: v.heartRate || 0,
-  }));
+  // Each chart only uses records that actually contain that measurement (no zero dips)
+  const bpChartData = profileVitals
+    .filter((v) => hasType(v, "bp"))
+    .map((v) => ({
+      date: vitalChartLabel(v.date),
+      systolic: v.systolicBP as number,
+      diastolic: v.diastolicBP as number,
+      heartRate: v.heartRate ?? null,
+    }));
 
-  // Prepare Chart Data for Blood Sugar
-  const sugarChartData = profileVitals.map((v) => ({
-    date: formatThaiDateShort(v.date),
-    sugar: v.bloodSugar || 0,
-  }));
+  const sugarChartData = profileVitals
+    .filter((v) => hasType(v, "sugar"))
+    .map((v) => ({ date: vitalChartLabel(v.date), sugar: v.bloodSugar as number }));
 
-  // Prepare Chart Data for Weight
-  const weightChartData = profileVitals.map((v) => ({
-    date: formatThaiDateShort(v.date),
-    weight: v.weight || 0,
-  }));
+  const weightChartData = profileVitals
+    .filter((v) => hasType(v, "weight"))
+    .map((v) => ({ date: vitalChartLabel(v.date), weight: v.weight as number }));
 
   // Prepare Stock Chart Data
   const stockChartData = profileMeds.map((m) => ({
@@ -101,10 +98,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   ];
 
   // Latest Vital Summary
-  const latestVital = profileVitals[profileVitals.length - 1] || null;
-  const bpEval = latestVital ? evaluateBP(latestVital.systolicBP, latestVital.diastolicBP) : null;
-  const sugarEval = latestVital ? evaluateSugar(latestVital.bloodSugar, latestVital.sugarType) : null;
-  const bmiEval = latestVital ? calculateBMI(latestVital.weight, latestVital.height) : null;
+  const latestBP = latestOfType(profileVitals, "bp");
+  const latestSugar = latestOfType(profileVitals, "sugar");
+  const latestWeight = latestOfType(profileVitals, "weight");
+  const bpEval = latestBP ? evaluateBP(latestBP.systolicBP, latestBP.diastolicBP) : null;
+  const sugarEval = latestSugar ? evaluateSugar(latestSugar.bloodSugar, latestSugar.sugarType) : null;
+  const bmiEval = latestWeight ? calculateBMI(latestWeight.weight, latestWeight.height ?? latestHeight(profileVitals)) : null;
 
   // Request AI Health Advice from Gemini Server Route
   const handleGenerateAiReport = async () => {
@@ -120,9 +119,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           medicines: profileMeds,
           adherenceRate: adherencePct,
           vitals: {
-            latestBP: latestVital ? `${latestVital.systolicBP}/${latestVital.diastolicBP}` : null,
-            latestSugar: latestVital ? latestVital.bloodSugar : null,
-            latestWeight: latestVital ? latestVital.weight : null,
+            latestBP: latestBP ? `${latestBP.systolicBP}/${latestBP.diastolicBP}` : null,
+            latestSugar: latestSugar ? latestSugar.bloodSugar : null,
+            latestWeight: latestWeight ? latestWeight.weight : null,
             bmi: bmiEval ? bmiEval.bmi : null,
           },
         }),
@@ -228,7 +227,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ความดันโลหิตล่าสุด</p>
             <p className="text-xl font-black text-slate-900 mt-0.5">
-              {latestVital?.systolicBP ? `${latestVital.systolicBP}/${latestVital.diastolicBP}` : "-"} <span className="text-xs text-slate-500 font-normal">mmHg</span>
+              {latestBP ? `${latestBP.systolicBP}/${latestBP.diastolicBP}` : "-"} <span className="text-xs text-slate-500 font-normal">mmHg</span>
             </p>
             {bpEval && <span className={`text-[10px] font-bold ${bpEval.color}`}>{bpEval.status}</span>}
           </div>
@@ -240,7 +239,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ค่าน้ำตาลปลายนิ้ว</p>
             <p className="text-xl font-black text-slate-900 mt-0.5">
-              {latestVital?.bloodSugar || "-"} <span className="text-xs text-slate-500 font-normal">mg/dL</span>
+              {latestSugar?.bloodSugar ?? "-"} <span className="text-xs text-slate-500 font-normal">mg/dL</span>
             </p>
             {sugarEval && <span className={`text-[10px] font-bold ${sugarEval.color}`}>{sugarEval.status}</span>}
           </div>
@@ -252,7 +251,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">น้ำหนักตัว & BMI</p>
             <p className="text-xl font-black text-slate-900 mt-0.5">
-              {latestVital?.weight || "-"} <span className="text-xs text-slate-500 font-normal">กก.</span>
+              {latestWeight?.weight ?? "-"} <span className="text-xs text-slate-500 font-normal">กก.</span>
             </p>
             {bmiEval && <span className="text-[10px] font-bold text-teal-700">BMI: {bmiEval.bmi} ({bmiEval.text})</span>}
           </div>
