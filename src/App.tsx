@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { localDateStr } from "./utils/thaiHelpers";
+import { VitalType, latestHeight } from "./utils/vitals";
 import { User, onAuthStateChanged } from "firebase/auth";
 import { SystemData, UserProfile, Medicine, MealTime, FoodRelation, HealthVital, DoctorAppointment, LineConfig, MedicalRecord } from "./types";
 import { loadInitialData, saveData, syncToCloud, fetchFromCloud, clearAllSystemData, getLocalUpdatedAt, markLocalModified } from "./utils/storage";
@@ -228,6 +229,7 @@ export default function App() {
   const [showAddMedModal, setShowAddMedModal] = useState<boolean>(false);
   const [showAddVitalsModal, setShowAddVitalsModal] = useState<boolean>(false);
   const [editVital, setEditVital] = useState<HealthVital | null>(null);
+  const [vitalsInitialType, setVitalsInitialType] = useState<VitalType>("bp");
   const [showAddApptModal, setShowAddApptModal] = useState<boolean>(false);
   const [showAddProfileModal, setShowAddProfileModal] = useState<boolean>(false);
   const [editingProfile, setEditingProfile] = useState<UserProfile | null>(null);
@@ -697,7 +699,7 @@ export default function App() {
             appointments={data.appointments}
             lineConfig={data.lineConfig}
             onToggleIntake={handleToggleIntake}
-            onOpenAddVitals={() => setShowAddVitalsModal(true)}
+            onOpenAddVitals={(type) => { setEditVital(null); setVitalsInitialType(type || "bp"); setShowAddVitalsModal(true); }}
             onEditVital={(v) => { setEditVital(v); setShowAddVitalsModal(true); }}
             onDeleteVital={handleDeleteVital}
             onOpenRefill={(med) => setRefillMed(med)}
@@ -826,6 +828,8 @@ export default function App() {
         <AddVitalsModal
           profileId={activeProfile.id}
           vitalToEdit={editVital}
+          initialType={vitalsInitialType}
+          lastHeight={latestHeight(data.vitals.filter((v) => v.profileId === activeProfile.id))}
           onClose={() => { setShowAddVitalsModal(false); setEditVital(null); }}
           onSave={handleSaveVitals}
         />
